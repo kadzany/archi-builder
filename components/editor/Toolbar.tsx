@@ -28,6 +28,8 @@ import {
   FileJson,
   FileImage,
   CheckSquare,
+  ArrowRight,
+  Minus,
 } from 'lucide-react';
 
 interface ToolbarProps {
@@ -45,6 +47,8 @@ interface ToolbarProps {
   onDuplicate?: () => void;
   onAutoLayout?: () => void;
   onValidate?: () => void;
+  onConnectionMode?: (mode: 'arrow' | 'line' | null) => void;
+  connectionMode?: 'arrow' | 'line' | null;
   canUndo?: boolean;
   canRedo?: boolean;
   isLocked?: boolean;
@@ -65,6 +69,8 @@ export function Toolbar({
   onDuplicate,
   onAutoLayout,
   onValidate,
+  onConnectionMode,
+  connectionMode,
   canUndo = false,
   canRedo = false,
   isLocked = false,
@@ -208,6 +214,38 @@ export function Toolbar({
             </TooltipTrigger>
             <TooltipContent>
               <p>Align Right</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Separator orientation="vertical" className="h-8" />
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={connectionMode === 'arrow' ? 'default' : 'ghost'}
+                size="icon"
+                onClick={() => onConnectionMode?.(connectionMode === 'arrow' ? null : 'arrow')}
+              >
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Draw Arrow Connection</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={connectionMode === 'line' ? 'default' : 'ghost'}
+                size="icon"
+                onClick={() => onConnectionMode?.(connectionMode === 'line' ? null : 'line')}
+              >
+                <Minus className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Draw Line Connection</p>
             </TooltipContent>
           </Tooltip>
 

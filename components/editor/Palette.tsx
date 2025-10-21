@@ -26,9 +26,8 @@ export function Palette({ onDragStart }: PaletteProps) {
       </div>
 
       <Tabs defaultValue="shapes" className="w-full">
-        <TabsList className="w-full grid grid-cols-4 rounded-none">
+        <TabsList className="w-full grid grid-cols-3 rounded-none">
           <TabsTrigger value="shapes" className="text-xs">Nodes</TabsTrigger>
-          <TabsTrigger value="connectors" className="text-xs">Lines</TabsTrigger>
           <TabsTrigger value="togaf" className="text-xs">TOGAF</TabsTrigger>
           <TabsTrigger value="etom" className="text-xs">eTOM</TabsTrigger>
         </TabsList>
@@ -126,26 +125,6 @@ export function Palette({ onDragStart }: PaletteProps) {
                 );
               })}
             </div>
-          </TabsContent>
-
-          <TabsContent value="connectors" className="p-3 space-y-2 mt-0">
-            <h3 className="text-xs font-medium text-muted-foreground uppercase mb-2">Connectors & Lines</h3>
-            {CONNECTOR_TYPES.map((connector) => {
-              const IconComponent = Icons[connector.icon as keyof typeof Icons] as any;
-              return (
-                <div
-                  key={connector.id}
-                  draggable
-                  onDragStart={(e) => handleDragStart(e, 'connector', connector)}
-                  className="flex items-center gap-2 p-2 rounded border bg-card hover:bg-accent cursor-move transition-colors"
-                >
-                  <div className="w-8 h-8 rounded flex items-center justify-center bg-muted">
-                    {IconComponent && <IconComponent className="w-4 h-4" />}
-                  </div>
-                  <span className="text-sm font-medium">{connector.label}</span>
-                </div>
-              );
-            })}
           </TabsContent>
 
           <TabsContent value="togaf" className="p-3 space-y-2 mt-0">

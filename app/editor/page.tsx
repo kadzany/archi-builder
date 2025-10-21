@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Palette } from '@/components/editor/Palette';
 import { PropertiesPanel } from '@/components/editor/PropertiesPanel';
 import { Toolbar } from '@/components/editor/Toolbar';
@@ -15,6 +15,9 @@ export default function EditorPage() {
   const [edges, setEdges] = useState<DiagramEdge[]>([]);
   const [selectedNode, setSelectedNode] = useState<DiagramNode | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<DiagramEdge | null>(null);
+  const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
+  const [selectedEdges, setSelectedEdges] = useState<string[]>([]);
+  const [connectionMode, setConnectionMode] = useState<'arrow' | 'line' | null>(null);
 
   const handleCanvasDrop = (data: any, position: { x: number; y: number }) => {
     const isContainer = data.isContainer || data.shape === 'swimlane' || data.shape === 'phase' || data.shape === 'processArea';
@@ -55,14 +58,80 @@ export default function EditorPage() {
     });
   };
 
-  const handleNodeClick = (node: DiagramNode) => {
-    setSelectedNode(node);
-    setSelectedEdge(null);
+  const handleConnectionStart = (nodeId: string) => {
+    toast({
+      title: 'Connection Started',
+      description: 'Click another node to complete the connection',
+    });
   };
 
-  const handleEdgeClick = (edge: DiagramEdge) => {
-    setSelectedEdge(edge);
+  const handleConnectionEnd = (sourceId: string, targetId: string) => {
+    const newEdge: DiagramEdge = {
+      id: `edge-${Date.now()}`,
+      source: sourceId,
+      target: targetId,
+      type: 'straight',
+      animated: connectionMode === 'arrow',
+      style: {
+        strokeWidth: 2,
+        strokeColor: '#64748b',
+      },
+    };
+
+    setEdges((prev) => [...prev, newEdge]);
+    setConnectionMode(null);
+
+    toast({
+      title: 'Connection Created',
+      description: `${connectionMode === 'arrow' ? 'Arrow' : 'Line'} connection created`,
+    });
+  };
+
+  const handleConnectionModeChange = (mode: 'arrow' | 'line' | null) => {
+    setConnectionMode(mode);
+    if (mode) {
+      toast({
+        title: 'Connection Mode Active',
+        description: `Click two nodes to create ${mode} connection`,
+      });
+    }
+  };
+
+  const handleNodeClick = (node: DiagramNode, multiSelect?: boolean) => {
+    if (multiSelect) {
+      if (selectedNodes.includes(node.id)) {
+        setSelectedNodes(selectedNodes.filter(id => id !== node.id));
+      } else {
+        setSelectedNodes([...selectedNodes, node.id]);
+      }
+    } else {
+      setSelectedNode(node);
+      setSelectedEdge(null);
+      setSelectedNodes([]);
+      setSelectedEdges([]);
+    }
+  };
+
+  const handleEdgeClick = (edge: DiagramEdge, multiSelect?: boolean) => {
+    if (multiSelect) {
+      if (selectedEdges.includes(edge.id)) {
+        setSelectedEdges(selectedEdges.filter(id => id !== edge.id));
+      } else {
+        setSelectedEdges([...selectedEdges, edge.id]);
+      }
+    } else {
+      setSelectedEdge(edge);
+      setSelectedNode(null);
+      setSelectedNodes([]);
+      setSelectedEdges([]);
+    }
+  };
+
+  const handleMultiSelect = (nodeIds: string[], edgeIds: string[]) => {
+    setSelectedNodes(nodeIds);
+    setSelectedEdges(edgeIds);
     setSelectedNode(null);
+    setSelectedEdge(null);
   };
 
   const handleUpdateNode = (id: string, updates: Partial<DiagramNode>) => {
@@ -159,19 +228,78 @@ export default function EditorPage() {
   };
 
   const handleNodeMove = (nodeId: string, position: { x: number; y: number }) => {
-    setNodes((prev) =>
-      prev.map((node) =>
-        node.id === nodeId ? { ...node, position } : node
-      )
-    );
+    setNodes((prev) => {
+      const movingNode = prev.find(n => n.id === nodeId);
+      if (!movingNode) return prev;
+
+      const deltaX = position.x - movingNode.position.x;
+      const deltaY = position.y - movingNode.position.y;
+
+      return prev.map((node) => {
+        if (node.id === nodeId) {
+          const newNode = { ...node, position };
+
+          if (node.isContainer) {
+            const children = prev.filter(n => n.parentId === nodeId);
+            return newNode;
+          }
+
+          const container = prev.find(c =>
+            c.isContainer &&
+            position.x >= c.position.x &&
+            position.y >= c.position.y &&
+            position.x + node.size.w <= c.position.x + c.size.w &&
+            position.y + node.size.h <= c.position.y + c.size.h
+          );
+
+          return { ...newNode, parentId: container?.id };
+        }
+
+        if (node.parentId === nodeId) {
+          return {
+            ...node,
+            position: {
+              x: node.position.x + deltaX,
+              y: node.position.y + deltaY
+            }
+          };
+        }
+
+        return node;
+      });
+    });
 
     if (selectedNode?.id === nodeId) {
       setSelectedNode((prev) => (prev ? { ...prev, position } : null));
     }
   };
 
+  const handleNodeResize = (nodeId: string, size: { w: number; h: number }) => {
+    setNodes((prev) =>
+      prev.map((node) =>
+        node.id === nodeId ? { ...node, size } : node
+      )
+    );
+
+    if (selectedNode?.id === nodeId) {
+      setSelectedNode((prev) => (prev ? { ...prev, size } : null));
+    }
+  };
+
   const handleDelete = () => {
-    if (selectedNode) {
+    if (selectedNodes.length > 0 || selectedEdges.length > 0) {
+      setNodes((prev) => prev.filter((n) => !selectedNodes.includes(n.id)));
+      setEdges((prev) => prev.filter((e) =>
+        !selectedEdges.includes(e.id) &&
+        !selectedNodes.includes(e.source) &&
+        !selectedNodes.includes(e.target)
+      ));
+      setSelectedNodes([]);
+      setSelectedEdges([]);
+      toast({
+        title: `Deleted ${selectedNodes.length} node(s) and ${selectedEdges.length} edge(s)`
+      });
+    } else if (selectedNode) {
       setNodes((prev) => prev.filter((n) => n.id !== selectedNode.id));
       setEdges((prev) =>
         prev.filter((e) => e.source !== selectedNode.id && e.target !== selectedNode.id)
@@ -185,6 +313,23 @@ export default function EditorPage() {
     }
   };
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        const target = event.target as HTMLElement;
+        const isInputField = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+
+        if (!isInputField && (selectedNode || selectedEdge)) {
+          event.preventDefault();
+          handleDelete();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedNode, selectedEdge]);
+
   return (
     <div className="h-screen flex flex-col">
       <Toolbar
@@ -192,6 +337,8 @@ export default function EditorPage() {
         onExport={handleExport}
         onValidate={handleValidate}
         onDelete={handleDelete}
+        onConnectionMode={handleConnectionModeChange}
+        connectionMode={connectionMode}
       />
 
       <div className="flex-1 flex overflow-hidden">
@@ -200,10 +347,18 @@ export default function EditorPage() {
         <DiagramCanvas
           nodes={nodes}
           edges={edges}
+          selectedEdge={selectedEdge}
+          selectedNodes={selectedNodes}
+          selectedEdges={selectedEdges}
           onNodeClick={handleNodeClick}
           onEdgeClick={handleEdgeClick}
           onCanvasDrop={handleCanvasDrop}
           onNodeMove={handleNodeMove}
+          onNodeResize={handleNodeResize}
+          onMultiSelect={handleMultiSelect}
+          connectionMode={connectionMode}
+          onConnectionStart={handleConnectionStart}
+          onConnectionEnd={handleConnectionEnd}
         />
 
         <PropertiesPanel

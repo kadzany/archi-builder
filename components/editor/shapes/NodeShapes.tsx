@@ -145,9 +145,9 @@ export function NoteNode({ node, isDragging, onMouseDown, onClick }: NodeShapePr
             `${node.style.backgroundColor}cc` : '#fde68acc',
         }}
       />
-      <div className="flex items-start justify-start h-full p-3 pointer-events-none">
+      <div className="flex flex-col items-start justify-start h-full p-3 pointer-events-none overflow-hidden">
         <span
-          className="text-sm break-words text-left"
+          className="text-sm break-words text-left font-semibold mb-1"
           style={{
             color: node.style?.color || '#92400e',
             fontSize: node.style?.fontSize || 12,
@@ -155,6 +155,17 @@ export function NoteNode({ node, isDragging, onMouseDown, onClick }: NodeShapePr
         >
           {node.label}
         </span>
+        {node.props?.notes && (
+          <span
+            className="text-xs break-words text-left whitespace-pre-wrap"
+            style={{
+              color: node.style?.color || '#92400e',
+              fontSize: (node.style?.fontSize || 12) - 2,
+            }}
+          >
+            {node.props.notes}
+          </span>
+        )}
       </div>
     </div>
   );
