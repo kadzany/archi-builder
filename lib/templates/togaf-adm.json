@@ -1,0 +1,113 @@
+{
+  "$schema": "https://archibuilder.dev/schema/v1",
+  "version": "1.0.0",
+  "meta": {
+    "title": "TOGAF ADM Phases",
+    "description": "Complete TOGAF Architecture Development Method (ADM) swimlane template",
+    "createdAt": "2025-01-01T00:00:00Z",
+    "updatedAt": "2025-01-01T00:00:00Z",
+    "tags": ["TOGAF", "ADM", "Enterprise Architecture"]
+  },
+  "layers": [
+    {
+      "id": "diagram",
+      "type": "reactflow",
+      "visible": true
+    },
+    {
+      "id": "annotations",
+      "type": "konva",
+      "visible": true
+    }
+  ],
+  "nodes": [
+    {
+      "id": "preliminary",
+      "type": "swimlane",
+      "framework": { "togafPhase": "Preliminary" },
+      "position": { "x": 50, "y": 50 },
+      "size": { "w": 1400, "h": 100 },
+      "label": "Preliminary: Framework & Principles",
+      "style": { "color": "#64748b", "backgroundColor": "#f1f5f9" }
+    },
+    {
+      "id": "phase-a",
+      "type": "swimlane",
+      "framework": { "togafPhase": "A" },
+      "position": { "x": 50, "y": 170 },
+      "size": { "w": 1400, "h": 100 },
+      "label": "A: Architecture Vision",
+      "style": { "color": "#8b5cf6", "backgroundColor": "#f5f3ff" }
+    },
+    {
+      "id": "phase-b",
+      "type": "swimlane",
+      "framework": { "togafPhase": "B" },
+      "position": { "x": 50, "y": 290 },
+      "size": { "w": 1400, "h": 100 },
+      "label": "B: Business Architecture",
+      "style": { "color": "#3b82f6", "backgroundColor": "#eff6ff" }
+    },
+    {
+      "id": "phase-c",
+      "type": "swimlane",
+      "framework": { "togafPhase": "C" },
+      "position": { "x": 50, "y": 410 },
+      "size": { "w": 1400, "h": 100 },
+      "label": "C: Information Systems Architecture",
+      "style": { "color": "#06b6d4", "backgroundColor": "#ecfeff" }
+    },
+    {
+      "id": "phase-d",
+      "type": "swimlane",
+      "framework": { "togafPhase": "D" },
+      "position": { "x": 50, "y": 530 },
+      "size": { "w": 1400, "h": 100 },
+      "label": "D: Technology Architecture",
+      "style": { "color": "#10b981", "backgroundColor": "#ecfdf5" }
+    },
+    {
+      "id": "phase-e",
+      "type": "swimlane",
+      "framework": { "togafPhase": "E" },
+      "position": { "x": 50, "y": 650 },
+      "size": { "w": 1400, "h": 100 },
+      "label": "E: Opportunities & Solutions",
+      "style": { "color": "#f59e0b", "backgroundColor": "#fffbeb" }
+    },
+    {
+      "id": "phase-f",
+      "type": "swimlane",
+      "framework": { "togafPhase": "F" },
+      "position": { "x": 50, "y": 770 },
+      "size": { "w": 1400, "h": 100 },
+      "label": "F: Migration Planning",
+      "style": { "color": "#ef4444", "backgroundColor": "#fef2f2" }
+    },
+    {
+      "id": "phase-g",
+      "type": "swimlane",
+      "framework": { "togafPhase": "G" },
+      "position": { "x": 50, "y": 890 },
+      "size": { "w": 1400, "h": 100 },
+      "label": "G: Implementation Governance",
+      "style": { "color": "#ec4899", "backgroundColor": "#fdf2f8" }
+    },
+    {
+      "id": "phase-h",
+      "type": "swimlane",
+      "framework": { "togafPhase": "H" },
+      "position": { "x": 50, "y": 1010 },
+      "size": { "w": 1400, "h": 100 },
+      "label": "H: Architecture Change Management",
+      "style": { "color": "#6366f1", "backgroundColor": "#eef2ff" }
+    }
+  ],
+  "edges": [],
+  "annotations": [],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 0.8
+  }
+}

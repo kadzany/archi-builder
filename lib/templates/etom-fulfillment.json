@@ -1,0 +1,133 @@
+{
+  "$schema": "https://archibuilder.dev/schema/v1",
+  "version": "1.0.0",
+  "meta": {
+    "title": "eTOM Fulfillment Flow",
+    "description": "End-to-end service fulfillment process based on eTOM framework",
+    "createdAt": "2025-01-01T00:00:00Z",
+    "updatedAt": "2025-01-01T00:00:00Z",
+    "tags": ["eTOM", "Fulfillment", "OSS", "Service Order"]
+  },
+  "layers": [
+    {
+      "id": "diagram",
+      "type": "reactflow",
+      "visible": true
+    },
+    {
+      "id": "annotations",
+      "type": "konva",
+      "visible": true
+    }
+  ],
+  "nodes": [
+    {
+      "id": "lead-mgmt",
+      "type": "process",
+      "framework": { "etom": "Fulfillment" },
+      "position": { "x": 100, "y": 200 },
+      "size": { "w": 180, "h": 80 },
+      "label": "Lead Management",
+      "style": { "color": "#06b6d4", "icon": "User" },
+      "props": { "owner": "Sales", "sla": "4 hours" }
+    },
+    {
+      "id": "quote-mgmt",
+      "type": "process",
+      "framework": { "etom": "Fulfillment" },
+      "position": { "x": 340, "y": 200 },
+      "size": { "w": 180, "h": 80 },
+      "label": "Quote Management",
+      "style": { "color": "#06b6d4", "icon": "FileText" },
+      "props": { "owner": "Sales Ops", "sla": "24 hours" }
+    },
+    {
+      "id": "order-handling",
+      "type": "process",
+      "framework": { "etom": "Fulfillment" },
+      "position": { "x": 580, "y": 200 },
+      "size": { "w": 180, "h": 80 },
+      "label": "Service Order Handling",
+      "style": { "color": "#06b6d4", "icon": "Package" },
+      "props": { "owner": "Order Mgmt", "sla": "99.9%" }
+    },
+    {
+      "id": "design",
+      "type": "process",
+      "framework": { "etom": "Fulfillment" },
+      "position": { "x": 820, "y": 200 },
+      "size": { "w": 180, "h": 80 },
+      "label": "Service Design",
+      "style": { "color": "#06b6d4", "icon": "Pencil" },
+      "props": { "owner": "Engineering", "sla": "2-5 days" }
+    },
+    {
+      "id": "provisioning",
+      "type": "process",
+      "framework": { "etom": "Fulfillment" },
+      "position": { "x": 1060, "y": 200 },
+      "size": { "w": 180, "h": 80 },
+      "label": "Service Provisioning",
+      "style": { "color": "#06b6d4", "icon": "Settings" },
+      "props": { "owner": "NOC", "sla": "15 min" }
+    },
+    {
+      "id": "activation",
+      "type": "process",
+      "framework": { "etom": "Fulfillment" },
+      "position": { "x": 1300, "y": 200 },
+      "size": { "w": 180, "h": 80 },
+      "label": "Service Activation",
+      "style": { "color": "#06b6d4", "icon": "Power" },
+      "props": { "owner": "NOC", "sla": "5 min" }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "lead-mgmt",
+      "target": "quote-mgmt",
+      "type": "smoothstep",
+      "label": "qualify",
+      "props": { "latencyMs": 100 }
+    },
+    {
+      "id": "e2",
+      "source": "quote-mgmt",
+      "target": "order-handling",
+      "type": "smoothstep",
+      "label": "accept",
+      "props": { "latencyMs": 50 }
+    },
+    {
+      "id": "e3",
+      "source": "order-handling",
+      "target": "design",
+      "type": "smoothstep",
+      "label": "decompose",
+      "props": { "latencyMs": 200 }
+    },
+    {
+      "id": "e4",
+      "source": "design",
+      "target": "provisioning",
+      "type": "smoothstep",
+      "label": "configure",
+      "props": { "latencyMs": 500 }
+    },
+    {
+      "id": "e5",
+      "source": "provisioning",
+      "target": "activation",
+      "type": "smoothstep",
+      "label": "complete",
+      "props": { "latencyMs": 100 }
+    }
+  ],
+  "annotations": [],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  }
+}
