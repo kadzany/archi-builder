@@ -6,7 +6,7 @@ import { PropertiesPanel } from '@/components/editor/PropertiesPanel';
 import { Toolbar } from '@/components/editor/Toolbar';
 import { DiagramCanvas } from '@/components/editor/DiagramCanvas';
 import { LayerTransitionDialog } from '@/components/editor/LayerTransitionDialog';
-import { DiagramNode, DiagramEdge, DiagramSchema } from '@/lib/types/diagram';
+import { DiagramNode, DiagramEdge, DiagramSchema, NodeType, Framework } from '@/lib/types/diagram';
 import { exportDiagramToJSON, validateDiagram } from '@/lib/validation/governance';
 import { useToast } from '@/hooks/use-toast';
 import { isNodeTypeAllowedInLayer } from '@/lib/constants/layers';
@@ -112,7 +112,7 @@ export default function EditorPage() {
 
     const newNode: DiagramNode = {
       id: `node-${Date.now()}`,
-      type: nodeType,
+      type: nodeType as NodeType,
       label: data.label || data.name || data.id || 'New Node',
       position,
       size: defaultSize,
@@ -121,7 +121,7 @@ export default function EditorPage() {
         icon: data.icon,
         shape: data.shape || 'rectangle',
       },
-      framework, // ✅ consistent: sid/togaf/etom set by source
+      framework: framework as Framework, // ✅ consistent: sid/togaf/etom set by source
       isContainer,
       zIndex: isContainer ? 0 : 1,
     };

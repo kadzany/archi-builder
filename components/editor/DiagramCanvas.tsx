@@ -29,6 +29,17 @@ interface DiagramCanvasProps {
   onConnectionEnd?: (sourceId: string, targetId: string) => void;
 }
 
+const GRID_SIZE = 20;
+const MIN_W = 80;
+const MIN_H = 60;
+const ZOOM_MIN = 0.25;
+const ZOOM_MAX = 2;
+const ZOOM_STEP = 0.1;
+
+function snap(v: number) {
+  return Math.round(v / GRID_SIZE) * GRID_SIZE;
+}
+
 export function DiagramCanvas({
   nodes,
   edges,
@@ -42,31 +53,102 @@ export function DiagramCanvas({
   onConnectionStart,
   onConnectionEnd,
 }: DiagramCanvasProps) {
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);   // scroll container
+  const contentRef = useRef<HTMLDivElement>(null);  // large content surface
+
+  // interaction states
   const [draggedNode, setDraggedNode] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [canvasSize, setCanvasSize] = useState({ width: 5000, height: 5000 });
+
   const [resizingNode, setResizingNode] = useState<string | null>(null);
   const [resizeHandle, setResizeHandle] = useState<string | null>(null);
-  const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, w: 0, h: 0 });
+  const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, w: 0, h: 0, nodeRight: 0, nodeBottom: 0, nodeX: 0, nodeY: 0 });
+
   const [connectionSource, setConnectionSource] = useState<string | null>(null);
-  const [selectedNode, setSelectedNode] = useState<string | null>(null);
+
+  const [selectedNodeLocal, setSelectedNodeLocal] = useState<string | null>(null);
+  const [multiSelection, setMultiSelection] = useState<Set<string>>(new Set());
+
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [hoveredEdge, setHoveredEdge] = useState<string | null>(null);
 
+  // zoom & pan (pan tetap via scroll; plus Space+drag untuk geser scroll)
+  const [zoom, setZoom] = useState(1);
+  const [isPanning, setIsPanning] = useState(false);
+  const panStartRef = useRef<{ x: number; y: number; scrollLeft: number; scrollTop: number } | null>(null);
+  const [spacePressed, setSpacePressed] = useState(false);
+
+  // marquee selection
+  const [isMarquee, setIsMarquee] = useState(false);
+  const [marqueeStart, setMarqueeStart] = useState<{ x: number; y: number } | null>(null);
+  const [marqueeRect, setMarqueeRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+
+  // ---- Helpers ----
+
+  // Konversi client -> koordinat konten, mempertimbangkan scroll & zoom
+  const getCanvasPoint = (e: { clientX: number; clientY: number }) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left + canvas.scrollLeft) / zoom;
+    const y = (e.clientY - rect.top + canvas.scrollTop) / zoom;
+    return { x, y };
+  };
+
+  // Hit-test node dengan rect (partial overlap)
+  const nodeIntersectsRect = (node: DiagramNode, rect: { x: number; y: number; w: number; h: number }) => {
+    const nx1 = node.position.x;
+    const ny1 = node.position.y;
+    const nx2 = nx1 + node.size.w;
+    const ny2 = ny1 + node.size.h;
+
+    const rx1 = Math.min(rect.x, rect.x + rect.w);
+    const ry1 = Math.min(rect.y, rect.y + rect.h);
+    const rx2 = Math.max(rect.x, rect.x + rect.w);
+    const ry2 = Math.max(rect.y, rect.y + rect.h);
+
+    const overlap = !(nx2 < rx1 || nx1 > rx2 || ny2 < ry1 || ny1 > ry2);
+    return overlap;
+  };
+
+  // ---- Effects ----
+
   useEffect(() => {
     if (nodes.length === 0) return;
-
     const maxX = Math.max(...nodes.map(n => n.position.x + n.size.w));
     const maxY = Math.max(...nodes.map(n => n.position.y + n.size.h));
-
     const newWidth = Math.max(5000, maxX + 1000);
     const newHeight = Math.max(5000, maxY + 1000);
-
     setCanvasSize({ width: newWidth, height: newHeight });
   }, [nodes]);
+
+  // key handlers untuk Space (pan)
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        setSpacePressed(true);
+      }
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        setSpacePressed(false);
+        setIsPanning(false);
+        panStartRef.current = null;
+      }
+    };
+    window.addEventListener('keydown', down, { passive: false });
+    window.addEventListener('keyup', up, { passive: false });
+    return () => {
+      window.removeEventListener('keydown', down as any);
+      window.removeEventListener('keyup', up as any);
+    };
+  }, []);
+
+  // ---- Drag & Drop dari Palette (drop offset fix + zoom aware) ----
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -75,30 +157,39 @@ export function DiagramCanvas({
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-
     if (!canvasRef.current || !contentRef.current) return;
 
-    const rect = contentRef.current.getBoundingClientRect();
-    const scrollLeft = canvasRef.current.scrollLeft;
-    const scrollTop = canvasRef.current.scrollTop;
-
-    const position = {
-      x: e.clientX - rect.left + scrollLeft,
-      y: e.clientY - rect.top + scrollTop,
-    };
+    const point = getCanvasPoint(e);
 
     try {
-      const data = JSON.parse(e.dataTransfer.getData('application/json'));
-      onCanvasDrop?.(data, position);
+      const raw = e.dataTransfer.getData('application/json');
+      const data = JSON.parse(raw);
+      // Snap posisi awal ke grid juga (lebih rapi)
+      onCanvasDrop?.(data, { x: snap(point.x), y: snap(point.y) });
     } catch (err) {
       console.error('Failed to parse drop data', err);
     }
   };
 
+  // ---- Node interactions ----
+
   const handleNodeMouseDown = (e: React.MouseEvent, node: DiagramNode) => {
     e.stopPropagation();
 
-    setSelectedNode(node.id);
+    // multi-select toggle dengan Shift
+    if (e.shiftKey) {
+      setMultiSelection((prev) => {
+        const next = new Set(prev);
+        if (next.has(node.id)) next.delete(node.id);
+        else next.add(node.id);
+        return next;
+      });
+    } else {
+      // kalau node ini sudah termasuk multiSelection, biarkan (untuk group move)
+      setMultiSelection((prev) => (prev.has(node.id) ? prev : new Set([node.id])));
+    }
+    setSelectedNodeLocal(node.id);
+    onNodeClick?.(node);
 
     if (connectionMode) {
       if (!connectionSource) {
@@ -111,108 +202,236 @@ export function DiagramCanvas({
       return;
     }
 
-    if (!canvasRef.current || !contentRef.current) return;
+    if (!canvasRef.current) return;
 
-    const rect = contentRef.current.getBoundingClientRect();
-    const scrollLeft = canvasRef.current.scrollLeft;
-    const scrollTop = canvasRef.current.scrollTop;
+    const point = getCanvasPoint(e);
 
     setDraggedNode(node.id);
     setDragOffset({
-      x: e.clientX - rect.left + scrollLeft - node.position.x,
-      y: e.clientY - rect.top + scrollTop - node.position.y,
+      x: point.x - node.position.x,
+      y: point.y - node.position.y,
     });
   };
 
   const handleResizeMouseDown = (e: React.MouseEvent, node: DiagramNode, handle: string) => {
     e.stopPropagation();
-    if (!canvasRef.current || !contentRef.current) return;
+    if (!canvasRef.current) return;
 
-    const rect = contentRef.current.getBoundingClientRect();
-    const scrollLeft = canvasRef.current.scrollLeft;
-    const scrollTop = canvasRef.current.scrollTop;
-
+    const p = getCanvasPoint(e);
     setResizingNode(node.id);
     setResizeHandle(handle);
     setResizeStart({
-      x: e.clientX - rect.left + scrollLeft,
-      y: e.clientY - rect.top + scrollTop,
+      x: p.x,
+      y: p.y,
       w: node.size.w,
       h: node.size.h,
+      nodeRight: node.position.x + node.size.w,
+      nodeBottom: node.position.y + node.size.h,
+      nodeX: node.position.x,
+      nodeY: node.position.y,
     });
+  };
+
+  // ---- Canvas interactions ----
+
+  const handleWheel = (e: React.WheelEvent) => {
+    if (!(e.ctrlKey || e.metaKey)) return; // hanya zoom jika ctrl/cmd ditekan
+    e.preventDefault();
+
+    const delta = -Math.sign(e.deltaY) * ZOOM_STEP; // scroll down => zoom out
+    const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, parseFloat((zoom + delta).toFixed(2))));
+    setZoom(next);
+  };
+
+  const beginPanIfNeeded = (e: React.MouseEvent) => {
+    if (!spacePressed) return false;
+    const canvas = canvasRef.current;
+    if (!canvas) return false;
+    const rect = canvas.getBoundingClientRect();
+    setIsPanning(true);
+    panStartRef.current = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+      scrollLeft: canvas.scrollLeft,
+      scrollTop: canvas.scrollTop,
+    };
+    return true;
+  };
+
+  const handleMouseDownOnCanvas = (e: React.MouseEvent) => {
+    // Space+drag => pan
+    if (beginPanIfNeeded(e)) return;
+
+    // klik di area kosong => mulai marquee
+    if (e.target === contentRef.current || e.target === canvasRef.current) {
+      const p = getCanvasPoint(e);
+      setIsMarquee(true);
+      setMarqueeStart(p);
+      setMarqueeRect({ x: p.x, y: p.y, w: 0, h: 0 });
+      // reset selection kalau tidak menahan Shift
+      if (!e.shiftKey) {
+        setMultiSelection(new Set());
+        setSelectedNodeLocal(null);
+      }
+    }
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!canvasRef.current || !contentRef.current) return;
 
-    const rect = contentRef.current.getBoundingClientRect();
-    const scrollLeft = canvasRef.current.scrollLeft;
-    const scrollTop = canvasRef.current.scrollTop;
+    const point = getCanvasPoint(e);
+    setMousePosition(point);
 
-    const currentX = e.clientX - rect.left + scrollLeft;
-    const currentY = e.clientY - rect.top + scrollTop;
+    // Pan mode (Space+drag)
+    if (isPanning && panStartRef.current) {
+      const canvas = canvasRef.current;
+      const rect = canvas.getBoundingClientRect();
+      const dx = (e.clientX - rect.left) - panStartRef.current.x;
+      const dy = (e.clientY - rect.top) - panStartRef.current.y;
+      canvas.scrollLeft = panStartRef.current.scrollLeft - dx;
+      canvas.scrollTop = panStartRef.current.scrollTop - dy;
+      return;
+    }
 
-    setMousePosition({ x: currentX, y: currentY });
+    // Marquee update
+    if (isMarquee && marqueeStart) {
+      setMarqueeRect({
+        x: marqueeStart.x,
+        y: marqueeStart.y,
+        w: point.x - marqueeStart.x,
+        h: point.y - marqueeStart.y,
+      });
+      return;
+    }
 
+    // Resize
     if (resizingNode && resizeHandle) {
       const node = nodes.find(n => n.id === resizingNode);
       if (!node) return;
 
-      const currentX = e.clientX - rect.left + scrollLeft;
-      const currentY = e.clientY - rect.top + scrollTop;
-      const deltaX = currentX - resizeStart.x;
-      const deltaY = currentY - resizeStart.y;
+      const dx = point.x - resizeStart.x;
+      const dy = point.y - resizeStart.y;
 
+      // Hitung newW/newH dan (opsional) newX/newY untuk handle W/N agar snap konsisten
       let newW = resizeStart.w;
       let newH = resizeStart.h;
+      let newX = node.position.x;
+      let newY = node.position.y;
 
-      if (resizeHandle.includes('e')) newW = Math.max(80, resizeStart.w + deltaX);
-      if (resizeHandle.includes('w')) newW = Math.max(80, resizeStart.w - deltaX);
-      if (resizeHandle.includes('s')) newH = Math.max(60, resizeStart.h + deltaY);
-      if (resizeHandle.includes('n')) newH = Math.max(60, resizeStart.h - deltaY);
+      if (resizeHandle.includes('e')) {
+        const wRaw = Math.max(MIN_W, resizeStart.w + dx);
+        newW = snap(wRaw);
+      }
+      if (resizeHandle.includes('s')) {
+        const hRaw = Math.max(MIN_H, resizeStart.h + dy);
+        newH = snap(hRaw);
+      }
+      if (resizeHandle.includes('w')) {
+        const wRaw = Math.max(MIN_W, resizeStart.w - dx);
+        newW = snap(wRaw);
+        // jaga right-edge tetap, geser X
+        newX = snap(resizeStart.nodeRight - newW);
+      }
+      if (resizeHandle.includes('n')) {
+        const hRaw = Math.max(MIN_H, resizeStart.h - dy);
+        newH = snap(hRaw);
+        // jaga bottom-edge tetap, geser Y
+        newY = snap(resizeStart.nodeBottom - newH);
+      }
 
+      // apply: jika X/Y berubah (handle N/W) maka pindah node dulu, lalu ubah size
+      if (newX !== node.position.x || newY !== node.position.y) {
+        onNodeMove?.(resizingNode, { x: newX, y: newY });
+      }
       onNodeResize?.(resizingNode, { w: newW, h: newH });
       return;
     }
 
+    // Drag single / group
     if (draggedNode) {
-      const node = nodes.find(n => n.id === draggedNode);
-      if (!node) return;
+      const primary = nodes.find(n => n.id === draggedNode);
+      if (!primary) return;
 
-      let newX = e.clientX - rect.left + scrollLeft - dragOffset.x;
-      let newY = e.clientY - rect.top + scrollTop - dragOffset.y;
+      const baseNewX = Math.max(0, point.x - dragOffset.x);
+      const baseNewY = Math.max(0, point.y - dragOffset.y);
+      const snappedX = snap(baseNewX);
+      const snappedY = snap(baseNewY);
 
-      newX = Math.max(0, newX);
-      newY = Math.max(0, newY);
+      const selection = multiSelection.size > 0 ? multiSelection : new Set([draggedNode]);
 
-      onNodeMove?.(draggedNode, { x: newX, y: newY });
+      // Hitung delta terhadap posisi node yang sedang di-drag
+      const dx = snappedX - primary.position.x;
+      const dy = snappedY - primary.position.y;
+
+      // Gerakkan semua yang terseleksi, masing-masing di-callback
+      selection.forEach((id) => {
+        const node = nodes.find(n => n.id === id);
+        if (!node) return;
+        const nx = Math.max(0, snap(node.position.x + dx));
+        const ny = Math.max(0, snap(node.position.y + dy));
+        onNodeMove?.(id, { x: nx, y: ny });
+      });
     }
+  };
+
+  const finalizeMarqueeSelection = () => {
+    if (!marqueeRect) return;
+    const selected = new Set<string>();
+    nodes.forEach((n) => {
+      if (nodeIntersectsRect(n, marqueeRect)) selected.add(n.id);
+    });
+    setMultiSelection((prev) => {
+      const merged = new Set(prev);
+      selected.forEach(id => merged.add(id));
+      return merged;
+    });
   };
 
   const handleMouseUp = () => {
     setDraggedNode(null);
     setResizingNode(null);
     setResizeHandle(null);
+
+    if (isMarquee) {
+      finalizeMarqueeSelection();
+    }
+    setIsMarquee(false);
+    setMarqueeStart(null);
+    setMarqueeRect(null);
+
+    if (isPanning) {
+      setIsPanning(false);
+      panStartRef.current = null;
+    }
   };
 
   const handleCanvasClick = (e: React.MouseEvent) => {
     if (e.target === contentRef.current || e.target === canvasRef.current) {
-      setSelectedNode(null);
+      // clear selection jika klik kosong tanpa Shift
+      if (!e.shiftKey) {
+        setSelectedNodeLocal(null);
+        setMultiSelection(new Set());
+      }
     }
   };
+
+  // ---- Render ----
 
   return (
     <div
       ref={canvasRef}
-      className="flex-1 relative bg-muted/30 overflow-auto"
+      className={`flex-1 relative overflow-auto ${spacePressed ? 'cursor-grab' : 'cursor-default'} bg-muted/30`}
+      onWheel={handleWheel}
+      onMouseDown={handleMouseDownOnCanvas}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
       onClick={handleCanvasClick}
+      style={{ userSelect: isMarquee || isPanning ? 'none' : undefined }}
     >
       <div
         ref={contentRef}
-        className="relative"
+        className="relative will-change-transform"
         onDragOver={handleDragOver}
         onDrop={handleDrop}
         style={{
@@ -220,17 +439,20 @@ export function DiagramCanvas({
           height: canvasSize.height,
           minWidth: '100%',
           minHeight: '100%',
+          transform: `scale(${zoom})`,
+          transformOrigin: 'top left',
           backgroundImage: `
             linear-gradient(rgba(0, 0, 0, 0.05) 1px, transparent 1px),
             linear-gradient(90deg, rgba(0, 0, 0, 0.05) 1px, transparent 1px)
           `,
-          backgroundSize: '20px 20px',
+          backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
         }}
       >
         {nodes.map((node) => {
           const isConnectionSource = connectionSource === node.id;
           const isHoverable = connectionMode && connectionSource && connectionSource !== node.id;
           const isHovered = hoveredNode === node.id;
+          const isSelected = multiSelection.has(node.id);
 
           const nodeProps = {
             node,
@@ -271,17 +493,19 @@ export function DiagramCanvas({
               onMouseEnter={() => isHoverable && setHoveredNode(node.id)}
               onMouseLeave={() => setHoveredNode(null)}
             >
-              {isConnectionSource && (
+              {(isConnectionSource || isSelected) && (
                 <div
-                  className="absolute rounded-lg animate-pulse"
+                  className="absolute rounded-lg"
                   style={{
                     left: node.position.x - 8,
                     top: node.position.y - 8,
                     width: node.size.w + 16,
                     height: node.size.h + 16,
-                    border: '3px solid #3b82f6',
-                    boxShadow: '0 0 20px rgba(59, 130, 246, 0.5)',
-                    zIndex: node.zIndex || 1,
+                    border: isConnectionSource ? '3px solid #3b82f6' : '2px solid #60a5fa',
+                    boxShadow: isConnectionSource
+                      ? '0 0 20px rgba(59, 130, 246, 0.5)'
+                      : '0 0 12px rgba(96, 165, 250, 0.5)',
+                    zIndex: (node.zIndex || 1) + 1,
                     pointerEvents: 'none',
                   }}
                 />
@@ -296,125 +520,54 @@ export function DiagramCanvas({
                     height: node.size.h + 12,
                     border: '2px solid #10b981',
                     boxShadow: '0 0 15px rgba(16, 185, 129, 0.5)',
-                    zIndex: node.zIndex || 1,
+                    zIndex: (node.zIndex || 1) + 1,
                     pointerEvents: 'none',
                   }}
                 />
               )}
               {NodeComponent}
-              {!connectionMode && selectedNode === node.id && (
+              {!connectionMode && selectedNodeLocal === node.id && (
                 <>
+                  {/* 8 resize handles */}
                   <div
                     className="absolute w-3 h-3 bg-blue-500 border-2 border-white rounded-full cursor-nwse-resize hover:scale-125 transition-transform shadow-md"
-                    style={{
-                      left: node.position.x - 6,
-                      top: node.position.y - 6,
-                      zIndex: 10000,
-                      pointerEvents: 'auto'
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleResizeMouseDown(e, node, 'nw');
-                    }}
+                    style={{ left: node.position.x - 6, top: node.position.y - 6, zIndex: 10000, pointerEvents: 'auto' }}
+                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleResizeMouseDown(e, node, 'nw'); }}
                   />
                   <div
                     className="absolute w-3 h-3 bg-blue-500 border-2 border-white rounded-full cursor-nesw-resize hover:scale-125 transition-transform shadow-md"
-                    style={{
-                      left: node.position.x + node.size.w - 6,
-                      top: node.position.y - 6,
-                      zIndex: 10000,
-                      pointerEvents: 'auto'
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleResizeMouseDown(e, node, 'ne');
-                    }}
+                    style={{ left: node.position.x + node.size.w - 6, top: node.position.y - 6, zIndex: 10000, pointerEvents: 'auto' }}
+                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleResizeMouseDown(e, node, 'ne'); }}
                   />
                   <div
                     className="absolute w-3 h-3 bg-blue-500 border-2 border-white rounded-full cursor-nwse-resize hover:scale-125 transition-transform shadow-md"
-                    style={{
-                      left: node.position.x + node.size.w - 6,
-                      top: node.position.y + node.size.h - 6,
-                      zIndex: 10000,
-                      pointerEvents: 'auto'
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleResizeMouseDown(e, node, 'se');
-                    }}
+                    style={{ left: node.position.x + node.size.w - 6, top: node.position.y + node.size.h - 6, zIndex: 10000, pointerEvents: 'auto' }}
+                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleResizeMouseDown(e, node, 'se'); }}
                   />
                   <div
                     className="absolute w-3 h-3 bg-blue-500 border-2 border-white rounded-full cursor-nesw-resize hover:scale-125 transition-transform shadow-md"
-                    style={{
-                      left: node.position.x - 6,
-                      top: node.position.y + node.size.h - 6,
-                      zIndex: 10000,
-                      pointerEvents: 'auto'
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleResizeMouseDown(e, node, 'sw');
-                    }}
+                    style={{ left: node.position.x - 6, top: node.position.y + node.size.h - 6, zIndex: 10000, pointerEvents: 'auto' }}
+                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleResizeMouseDown(e, node, 'sw'); }}
                   />
                   <div
                     className="absolute w-3 h-3 bg-blue-500 border-2 border-white rounded-full cursor-ns-resize hover:scale-125 transition-transform shadow-md"
-                    style={{
-                      left: node.position.x + node.size.w / 2 - 6,
-                      top: node.position.y - 6,
-                      zIndex: 10000,
-                      pointerEvents: 'auto'
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleResizeMouseDown(e, node, 'n');
-                    }}
+                    style={{ left: node.position.x + node.size.w / 2 - 6, top: node.position.y - 6, zIndex: 10000, pointerEvents: 'auto' }}
+                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleResizeMouseDown(e, node, 'n'); }}
                   />
                   <div
                     className="absolute w-3 h-3 bg-blue-500 border-2 border-white rounded-full cursor-ew-resize hover:scale-125 transition-transform shadow-md"
-                    style={{
-                      left: node.position.x + node.size.w - 6,
-                      top: node.position.y + node.size.h / 2 - 6,
-                      zIndex: 10000,
-                      pointerEvents: 'auto'
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleResizeMouseDown(e, node, 'e');
-                    }}
+                    style={{ left: node.position.x + node.size.w - 6, top: node.position.y + node.size.h / 2 - 6, zIndex: 10000, pointerEvents: 'auto' }}
+                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleResizeMouseDown(e, node, 'e'); }}
                   />
                   <div
                     className="absolute w-3 h-3 bg-blue-500 border-2 border-white rounded-full cursor-ns-resize hover:scale-125 transition-transform shadow-md"
-                    style={{
-                      left: node.position.x + node.size.w / 2 - 6,
-                      top: node.position.y + node.size.h - 6,
-                      zIndex: 10000,
-                      pointerEvents: 'auto'
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleResizeMouseDown(e, node, 's');
-                    }}
+                    style={{ left: node.position.x + node.size.w / 2 - 6, top: node.position.y + node.size.h - 6, zIndex: 10000, pointerEvents: 'auto' }}
+                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleResizeMouseDown(e, node, 's'); }}
                   />
                   <div
                     className="absolute w-3 h-3 bg-blue-500 border-2 border-white rounded-full cursor-ew-resize hover:scale-125 transition-transform shadow-md"
-                    style={{
-                      left: node.position.x - 6,
-                      top: node.position.y + node.size.h / 2 - 6,
-                      zIndex: 10000,
-                      pointerEvents: 'auto'
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleResizeMouseDown(e, node, 'w');
-                    }}
+                    style={{ left: node.position.x - 6, top: node.position.y + node.size.h / 2 - 6, zIndex: 10000, pointerEvents: 'auto' }}
+                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleResizeMouseDown(e, node, 'w'); }}
                   />
                 </>
               )}
@@ -431,46 +584,26 @@ export function DiagramCanvas({
           </div>
         )}
 
-        <svg className="absolute inset-0 pointer-events-none" style={{ width: canvasSize.width, height: canvasSize.height, zIndex: 9999 }}>
+        {/* EDGES (SVG) */}
+        <svg
+          className="absolute inset-0 pointer-events-none"
+          style={{ width: canvasSize.width, height: canvasSize.height, zIndex: 9999 }}
+        >
           <defs>
-            <marker
-              id="arrowhead"
-              markerWidth="10"
-              markerHeight="10"
-              refX="9"
-              refY="3"
-              orient="auto"
-              markerUnits="strokeWidth"
-            >
+            <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
               <path d="M0,0 L0,6 L9,3 z" fill="#64748b" />
             </marker>
-            <marker
-              id="arrowhead-selected"
-              markerWidth="10"
-              markerHeight="10"
-              refX="9"
-              refY="3"
-              orient="auto"
-              markerUnits="strokeWidth"
-            >
+            <marker id="arrowhead-selected" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
               <path d="M0,0 L0,6 L9,3 z" fill="#3b82f6" />
             </marker>
-            <marker
-              id="arrowhead-hover"
-              markerWidth="10"
-              markerHeight="10"
-              refX="9"
-              refY="3"
-              orient="auto"
-              markerUnits="strokeWidth"
-            >
+            <marker id="arrowhead-hover" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
               <path d="M0,0 L0,6 L9,3 z" fill="#10b981" />
             </marker>
           </defs>
+
           {edges.map((edge) => {
             const sourceNode = nodes.find((n) => n.id === edge.source);
             const targetNode = nodes.find((n) => n.id === edge.target);
-
             if (!sourceNode || !targetNode) return null;
 
             const sourceCenterX = sourceNode.position.x + sourceNode.size.w / 2;
@@ -478,14 +611,8 @@ export function DiagramCanvas({
             const targetCenterX = targetNode.position.x + targetNode.size.w / 2;
             const targetCenterY = targetNode.position.y + targetNode.size.h / 2;
 
-            const sourceAnchor = getEdgeAnchorPoint(
-              sourceNode,
-              { x: targetCenterX, y: targetCenterY }
-            );
-            const targetAnchor = getEdgeAnchorPoint(
-              targetNode,
-              { x: sourceCenterX, y: sourceCenterY }
-            );
+            const sourceAnchor = getEdgeAnchorPoint(sourceNode, { x: targetCenterX, y: targetCenterY });
+            const targetAnchor = getEdgeAnchorPoint(targetNode, { x: sourceCenterX, y: sourceCenterY });
 
             const midX = (sourceAnchor.x + targetAnchor.x) / 2;
             const midY = (sourceAnchor.y + targetAnchor.y) / 2;
@@ -500,8 +627,8 @@ export function DiagramCanvas({
               ? isSelected
                 ? 'url(#arrowhead-selected)'
                 : isHovered
-                  ? 'url(#arrowhead-hover)'
-                  : 'url(#arrowhead)'
+                ? 'url(#arrowhead-hover)'
+                : 'url(#arrowhead)'
               : undefined;
 
             return (
@@ -531,9 +658,7 @@ export function DiagramCanvas({
                   onClick={() => onEdgeClick?.(edge)}
                   onMouseEnter={() => setHoveredEdge(edge.id)}
                   onMouseLeave={() => setHoveredEdge(null)}
-                  style={{
-                    filter: isSelected ? 'drop-shadow(0 0 4px rgba(59, 130, 246, 0.5))' : undefined,
-                  }}
+                  style={{ filter: isSelected ? 'drop-shadow(0 0 4px rgba(59, 130, 246, 0.5))' : undefined }}
                 />
                 {edge.label && (
                   <text
@@ -542,11 +667,7 @@ export function DiagramCanvas({
                     textAnchor="middle"
                     dominantBaseline="middle"
                     className="fill-foreground text-xs font-medium pointer-events-none"
-                    style={{
-                      paintOrder: 'stroke',
-                      stroke: 'white',
-                      strokeWidth: 3,
-                    }}
+                    style={{ paintOrder: 'stroke', stroke: 'white', strokeWidth: 3 }}
                   >
                     {edge.label}
                   </text>
@@ -555,18 +676,11 @@ export function DiagramCanvas({
             );
           })}
 
+          {/* Connection preview */}
           {connectionSource && connectionMode && (() => {
             const sourceNode = nodes.find(n => n.id === connectionSource);
             if (!sourceNode) return null;
-
-            const sourceCenterX = sourceNode.position.x + sourceNode.size.w / 2;
-            const sourceCenterY = sourceNode.position.y + sourceNode.size.h / 2;
-
-            const sourceAnchor = getEdgeAnchorPoint(
-              sourceNode,
-              { x: mousePosition.x, y: mousePosition.y }
-            );
-
+            const sourceAnchor = getEdgeAnchorPoint(sourceNode, { x: mousePosition.x, y: mousePosition.y });
             return (
               <line
                 x1={sourceAnchor.x}
@@ -582,6 +696,21 @@ export function DiagramCanvas({
             );
           })()}
         </svg>
+
+        {/* Marquee rectangle */}
+        {isMarquee && marqueeRect && (
+          <div
+            className="absolute border-2 border-blue-400/70 bg-blue-400/10"
+            style={{
+              left: Math.min(marqueeRect.x, marqueeRect.x + marqueeRect.w),
+              top: Math.min(marqueeRect.y, marqueeRect.y + marqueeRect.h),
+              width: Math.abs(marqueeRect.w),
+              height: Math.abs(marqueeRect.h),
+              pointerEvents: 'none',
+              zIndex: 100000,
+            }}
+          />
+        )}
       </div>
     </div>
   );
