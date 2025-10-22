@@ -32,9 +32,9 @@ interface DiagramCanvasProps {
 const GRID_SIZE = 20;
 const MIN_W = 80;
 const MIN_H = 60;
-const ZOOM_MIN = 0.25;
+const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 2;
-const ZOOM_STEP = 0.1;
+const ZOOM_STEP = 0.05;
 
 function snap(v: number) {
   return Math.round(v / GRID_SIZE) * GRID_SIZE;
@@ -147,6 +147,43 @@ export function DiagramCanvas({
       window.removeEventListener('keyup', up as any);
     };
   }, []);
+
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+
+    // Zoom hanya untuk viewport kanvas
+    const onWheelNative = (ev: WheelEvent) => {
+      // Chrome/Win: ctrlKey true saat pinch/ctrl+wheel. macOS: metaKey (⌘) umumnya utk key combos,
+      // tapi kita jaga-jaga — kalau mau tetap strict Ctrl saja, ganti kondisi jadi (ev.ctrlKey).
+      if (ev.ctrlKey || ev.metaKey) {
+        ev.preventDefault(); // blok zoom halaman
+        const delta = -Math.sign(ev.deltaY) * ZOOM_STEP; // scroll down => zoom out
+        setZoom((z) => {
+          const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, parseFloat((z + delta).toFixed(2))));
+          return next;
+        });
+      }
+    };
+
+    // Safari: blok pinch gesture agar gak nge-zoom page
+    const blockGesture = (ev: Event) => {
+      ev.preventDefault();
+    };
+
+    el.addEventListener('wheel', onWheelNative, { passive: false });
+    el.addEventListener('gesturestart', blockGesture as any, { passive: false } as any);
+    el.addEventListener('gesturechange', blockGesture as any, { passive: false } as any);
+    el.addEventListener('gestureend', blockGesture as any, { passive: false } as any);
+
+    return () => {
+      el.removeEventListener('wheel', onWheelNative as any);
+      el.removeEventListener('gesturestart', blockGesture as any);
+      el.removeEventListener('gesturechange', blockGesture as any);
+      el.removeEventListener('gestureend', blockGesture as any);
+    };
+  }, []);
+
 
   // ---- Drag & Drop dari Palette (drop offset fix + zoom aware) ----
 
@@ -415,13 +452,32 @@ export function DiagramCanvas({
     }
   };
 
+  // --- tambahkan di atas (dalam komponen), dekat helper lain ---
+  const handleBlockContextMenu = (e: React.MouseEvent) => {
+    // Blokir menu konteks bawaan browser (right click & ctrl+click pada macOS)
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleMouseDownCapture = (e: React.MouseEvent) => {
+    // Beberapa browser/OS treat ctrl+left sebagai context menu (terutama macOS)
+    const isRightClick = e.button === 2;
+    const isCtrlLeftClick = e.ctrlKey && e.button === 0;
+    if (isRightClick || isCtrlLeftClick) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  };
+
   // ---- Render ----
 
   return (
     <div
       ref={canvasRef}
       className={`flex-1 relative overflow-auto ${spacePressed ? 'cursor-grab' : 'cursor-default'} bg-muted/30`}
-      onWheel={handleWheel}
+      // onWheel={handleWheel}
+      onMouseDownCapture={handleMouseDownCapture}
+      onContextMenu={handleBlockContextMenu} 
       onMouseDown={handleMouseDownOnCanvas}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -627,8 +683,8 @@ export function DiagramCanvas({
               ? isSelected
                 ? 'url(#arrowhead-selected)'
                 : isHovered
-                ? 'url(#arrowhead-hover)'
-                : 'url(#arrowhead)'
+                  ? 'url(#arrowhead-hover)'
+                  : 'url(#arrowhead)'
               : undefined;
 
             return (
