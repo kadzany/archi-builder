@@ -5,21 +5,35 @@ import { Palette } from '@/components/editor/Palette';
 import { PropertiesPanel } from '@/components/editor/PropertiesPanel';
 import { Toolbar } from '@/components/editor/Toolbar';
 import { DiagramCanvas } from '@/components/editor/DiagramCanvas';
+import { LayerTransitionDialog } from '@/components/editor/LayerTransitionDialog';
 import { DiagramNode, DiagramEdge, DiagramSchema } from '@/lib/types/diagram';
 import { exportDiagramToJSON, validateDiagram } from '@/lib/validation/governance';
 import { useToast } from '@/hooks/use-toast';
+import { isNodeTypeAllowedInLayer } from '@/lib/constants/layers';
 
 export default function EditorPage() {
   const { toast } = useToast();
+  const [currentLayer, setCurrentLayer] = useState<number>(0);
+  const [pendingLayer, setPendingLayer] = useState<number | null>(null);
+  const [showLayerDialog, setShowLayerDialog] = useState(false);
   const [nodes, setNodes] = useState<DiagramNode[]>([]);
   const [edges, setEdges] = useState<DiagramEdge[]>([]);
   const [selectedNode, setSelectedNode] = useState<DiagramNode | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<DiagramEdge | null>(null);
-  const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
-  const [selectedEdges, setSelectedEdges] = useState<string[]>([]);
   const [connectionMode, setConnectionMode] = useState<'arrow' | 'line' | null>(null);
 
   const handleCanvasDrop = (data: any, position: { x: number; y: number }) => {
+    const nodeType = data.id || 'capability';
+
+    if (!isNodeTypeAllowedInLayer(nodeType, currentLayer) && !['note', 'group'].includes(nodeType)) {
+      toast({
+        title: 'Node type not recommended',
+        description: `"${nodeType}" is not recommended for Layer L${currentLayer}. Consider switching layers.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+
     const isContainer = data.isContainer || data.shape === 'swimlane' || data.shape === 'phase' || data.shape === 'processArea';
 
     const defaultSize = isContainer
@@ -30,7 +44,7 @@ export default function EditorPage() {
 
     const newNode: DiagramNode = {
       id: `node-${Date.now()}`,
-      type: data.id || 'capability',
+      type: nodeType,
       label: data.label || 'New Node',
       position,
       size: defaultSize,
@@ -97,41 +111,14 @@ export default function EditorPage() {
     }
   };
 
-  const handleNodeClick = (node: DiagramNode, multiSelect?: boolean) => {
-    if (multiSelect) {
-      if (selectedNodes.includes(node.id)) {
-        setSelectedNodes(selectedNodes.filter(id => id !== node.id));
-      } else {
-        setSelectedNodes([...selectedNodes, node.id]);
-      }
-    } else {
-      setSelectedNode(node);
-      setSelectedEdge(null);
-      setSelectedNodes([]);
-      setSelectedEdges([]);
-    }
-  };
-
-  const handleEdgeClick = (edge: DiagramEdge, multiSelect?: boolean) => {
-    if (multiSelect) {
-      if (selectedEdges.includes(edge.id)) {
-        setSelectedEdges(selectedEdges.filter(id => id !== edge.id));
-      } else {
-        setSelectedEdges([...selectedEdges, edge.id]);
-      }
-    } else {
-      setSelectedEdge(edge);
-      setSelectedNode(null);
-      setSelectedNodes([]);
-      setSelectedEdges([]);
-    }
-  };
-
-  const handleMultiSelect = (nodeIds: string[], edgeIds: string[]) => {
-    setSelectedNodes(nodeIds);
-    setSelectedEdges(edgeIds);
-    setSelectedNode(null);
+  const handleNodeClick = (node: DiagramNode) => {
+    setSelectedNode(node);
     setSelectedEdge(null);
+  };
+
+  const handleEdgeClick = (edge: DiagramEdge) => {
+    setSelectedEdge(edge);
+    setSelectedNode(null);
   };
 
   const handleUpdateNode = (id: string, updates: Partial<DiagramNode>) => {
@@ -199,6 +186,30 @@ export default function EditorPage() {
     }
   };
 
+  const handleLayerChange = (newLayer: number) => {
+    if (newLayer !== currentLayer) {
+      setPendingLayer(newLayer);
+      setShowLayerDialog(true);
+    }
+  };
+
+  const handleConfirmLayerChange = () => {
+    if (pendingLayer !== null) {
+      setCurrentLayer(pendingLayer);
+      toast({
+        title: 'Layer changed',
+        description: `Switched to Layer L${pendingLayer}`,
+      });
+    }
+    setShowLayerDialog(false);
+    setPendingLayer(null);
+  };
+
+  const handleCancelLayerChange = () => {
+    setShowLayerDialog(false);
+    setPendingLayer(null);
+  };
+
   const handleValidate = () => {
     const schema: DiagramSchema = {
       $schema: 'https://archibuilder.dev/schema/v1',
@@ -217,7 +228,7 @@ export default function EditorPage() {
       annotations: [],
     };
 
-    const report = validateDiagram(schema);
+    const report = validateDiagram(schema, currentLayer);
 
     toast({
       title: 'Validation Report',
@@ -287,19 +298,7 @@ export default function EditorPage() {
   };
 
   const handleDelete = () => {
-    if (selectedNodes.length > 0 || selectedEdges.length > 0) {
-      setNodes((prev) => prev.filter((n) => !selectedNodes.includes(n.id)));
-      setEdges((prev) => prev.filter((e) =>
-        !selectedEdges.includes(e.id) &&
-        !selectedNodes.includes(e.source) &&
-        !selectedNodes.includes(e.target)
-      ));
-      setSelectedNodes([]);
-      setSelectedEdges([]);
-      toast({
-        title: `Deleted ${selectedNodes.length} node(s) and ${selectedEdges.length} edge(s)`
-      });
-    } else if (selectedNode) {
+    if (selectedNode) {
       setNodes((prev) => prev.filter((n) => n.id !== selectedNode.id));
       setEdges((prev) =>
         prev.filter((e) => e.source !== selectedNode.id && e.target !== selectedNode.id)
@@ -333,6 +332,8 @@ export default function EditorPage() {
   return (
     <div className="h-screen flex flex-col">
       <Toolbar
+        currentLayer={currentLayer}
+        onLayerChange={handleLayerChange}
         onSave={handleSave}
         onExport={handleExport}
         onValidate={handleValidate}
@@ -342,20 +343,17 @@ export default function EditorPage() {
       />
 
       <div className="flex-1 flex overflow-hidden">
-        <Palette />
+        <Palette currentLayer={currentLayer} />
 
         <DiagramCanvas
           nodes={nodes}
           edges={edges}
           selectedEdge={selectedEdge}
-          selectedNodes={selectedNodes}
-          selectedEdges={selectedEdges}
           onNodeClick={handleNodeClick}
           onEdgeClick={handleEdgeClick}
           onCanvasDrop={handleCanvasDrop}
           onNodeMove={handleNodeMove}
           onNodeResize={handleNodeResize}
-          onMultiSelect={handleMultiSelect}
           connectionMode={connectionMode}
           onConnectionStart={handleConnectionStart}
           onConnectionEnd={handleConnectionEnd}
@@ -368,6 +366,14 @@ export default function EditorPage() {
           onUpdateEdge={handleUpdateEdge}
         />
       </div>
+
+      <LayerTransitionDialog
+        open={showLayerDialog}
+        onClose={handleCancelLayerChange}
+        fromLayer={currentLayer}
+        toLayer={pendingLayer ?? currentLayer}
+        onConfirm={handleConfirmLayerChange}
+      />
     </div>
   );
 }

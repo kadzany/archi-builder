@@ -4,14 +4,31 @@ import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { TOGAF_PHASES, ETOM_AREAS, SID_ENTITIES, NODE_TYPES, CONTAINER_TYPES, SHAPE_TYPES, CONNECTOR_TYPES } from '@/lib/constants/frameworks';
+import { getLayerDefinition } from '@/lib/constants/layers';
 import * as Icons from 'lucide-react';
+import { Info } from 'lucide-react';
 
 interface PaletteProps {
+  currentLayer?: number;
   onDragStart?: (type: string, data: any) => void;
 }
 
-export function Palette({ onDragStart }: PaletteProps) {
+export function Palette({ currentLayer = 0, onDragStart }: PaletteProps) {
+  const layerDef = getLayerDefinition(currentLayer);
+
+  const filterByLayer = (items: readonly any[]) => {
+    return items.filter(item => {
+      const nodeType = item.id;
+      return layerDef.allowedNodeTypes.includes(nodeType as any) ||
+             layerDef.allowedContainers.includes(nodeType as any);
+    });
+  };
+
+  const filteredNodeTypes = filterByLayer(NODE_TYPES);
+  const filteredContainers = filterByLayer(CONTAINER_TYPES);
+  const filteredShapes = filterByLayer(SHAPE_TYPES);
   const handleDragStart = (e: React.DragEvent, type: string, data: any) => {
     e.dataTransfer.setData('application/json', JSON.stringify({ type, ...data }));
     e.dataTransfer.effectAllowed = 'copy';
@@ -23,6 +40,13 @@ export function Palette({ onDragStart }: PaletteProps) {
       <div className="p-4 border-b">
         <h2 className="font-semibold text-lg">Palette</h2>
         <p className="text-xs text-muted-foreground mt-1">Drag items to canvas</p>
+        <Badge
+          variant="secondary"
+          className="mt-2 text-[10px]"
+          style={{ backgroundColor: `${layerDef.color}20`, color: layerDef.color }}
+        >
+          {layerDef.shortLabel}: {layerDef.type}
+        </Badge>
       </div>
 
       <Tabs defaultValue="shapes" className="w-full">
@@ -34,9 +58,30 @@ export function Palette({ onDragStart }: PaletteProps) {
 
         <ScrollArea className="h-[calc(100vh-180px)]">
           <TabsContent value="shapes" className="p-3 space-y-2 mt-0">
+            {layerDef.recommendations.length > 0 && (
+              <Alert className="mb-3">
+                <Info className="h-4 w-4" />
+                <AlertDescription className="text-xs">
+                  <strong>{layerDef.label}</strong>
+                  <ul className="mt-1 space-y-0.5 ml-2">
+                    {layerDef.recommendations.slice(0, 2).map((rec, i) => (
+                      <li key={i}>• {rec}</li>
+                    ))}
+                  </ul>
+                </AlertDescription>
+              </Alert>
+            )}
+
             <div className="space-y-2">
-              <h3 className="text-xs font-medium text-muted-foreground uppercase">Node Types</h3>
-              {NODE_TYPES.map((nodeType) => {
+              <h3 className="text-xs font-medium text-muted-foreground uppercase">
+                Node Types ({filteredNodeTypes.length})
+              </h3>
+              {filteredNodeTypes.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-4 text-center">
+                  No node types available for this layer
+                </p>
+              ) : null}
+              {filteredNodeTypes.map((nodeType) => {
                 const IconComponent = Icons[nodeType.icon as keyof typeof Icons] as any;
                 return (
                   <div
@@ -58,8 +103,15 @@ export function Palette({ onDragStart }: PaletteProps) {
             </div>
 
             <div className="space-y-2 mt-4">
-              <h3 className="text-xs font-medium text-muted-foreground uppercase">Containers</h3>
-              {CONTAINER_TYPES.map((container) => {
+              <h3 className="text-xs font-medium text-muted-foreground uppercase">
+                Containers ({filteredContainers.length})
+              </h3>
+              {filteredContainers.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-4 text-center">
+                  No containers available for this layer
+                </p>
+              ) : null}
+              {filteredContainers.map((container) => {
                 const IconComponent = Icons[container.icon as keyof typeof Icons] as any;
                 return (
                   <div
@@ -81,8 +133,15 @@ export function Palette({ onDragStart }: PaletteProps) {
             </div>
 
             <div className="space-y-2 mt-4">
-              <h3 className="text-xs font-medium text-muted-foreground uppercase">Basic Shapes</h3>
-              {SHAPE_TYPES.map((shape) => {
+              <h3 className="text-xs font-medium text-muted-foreground uppercase">
+                Basic Shapes ({filteredShapes.length})
+              </h3>
+              {filteredShapes.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-4 text-center">
+                  No shapes available for this layer
+                </p>
+              ) : null}
+              {filteredShapes.map((shape) => {
                 const IconComponent = Icons[shape.icon as keyof typeof Icons] as any;
                 return (
                   <div

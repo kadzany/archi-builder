@@ -112,8 +112,9 @@ export default function Home() {
         </Card>
 
         <footer className="py-8 border-t text-center text-sm text-muted-foreground">
-          <p>ArchiBuilder v1.0 - Enterprise Architecture Diagramming Tool</p>
-          <p className="mt-2">Built with Next.js, TypeScript, and Tailwind CSS</p>
+          <p>ArchiBuilder v2.1 - Enterprise Architecture Diagramming Tool</p>
+          <p className="mt-2">Built with Next.js, TypeScript, Tailwind CSS & Supabase</p>
+          <p className="mt-1 text-xs">Layer-aware modeling • TOGAF + eTOM + SID aligned</p>
         </footer>
       </div>
     </div>

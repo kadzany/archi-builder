@@ -1,6 +1,7 @@
 import { DiagramSchema, ValidationIssue, GovernanceReport, DiagramNode, DiagramEdge } from '@/lib/types/diagram';
+import { isNodeTypeAllowedInLayer } from '@/lib/constants/layers';
 
-export function validateDiagram(schema: DiagramSchema): GovernanceReport {
+export function validateDiagram(schema: DiagramSchema, currentLayer?: number): GovernanceReport {
   const issues: ValidationIssue[] = [];
 
   const orphanNodes = findOrphanNodes(schema.nodes, schema.edges);
@@ -33,15 +34,37 @@ export function validateDiagram(schema: DiagramSchema): GovernanceReport {
     });
   });
 
-  const phaseMismatches = findPhaseMismatches(schema.edges, schema.nodes);
-  phaseMismatches.forEach(edge => {
+  const processWithoutService = validateProcessServiceMapping(schema.nodes, schema.edges);
+  processWithoutService.forEach(node => {
     issues.push({
       type: 'error',
-      message: `Edge connects nodes from incompatible phases`,
-      edgeId: edge.id,
-      category: 'phase-mismatch',
+      message: `Process "${node.label}" must have at least one Service/API connection`,
+      nodeId: node.id,
+      category: 'missing-property',
     });
   });
+
+  const capabilityWithoutApp = validateCapabilityRealization(schema.nodes, schema.edges);
+  capabilityWithoutApp.forEach(node => {
+    issues.push({
+      type: 'error',
+      message: `Capability "${node.label}" must be realized by at least one Application`,
+      nodeId: node.id,
+      category: 'missing-property',
+    });
+  });
+
+  const piiDataIssues = validatePIIDataCompliance(schema.nodes);
+  piiDataIssues.forEach(issue => {
+    issues.push(issue);
+  });
+
+  if (currentLayer !== undefined) {
+    const layerViolations = validateLayerCompliance(schema.nodes, currentLayer);
+    layerViolations.forEach(issue => {
+      issues.push(issue);
+    });
+  }
 
   const coverage = calculateCoverage(schema.nodes);
 
@@ -98,6 +121,94 @@ function findPhaseMismatches(edges: DiagramEdge[], nodes: DiagramNode[]): Diagra
   });
 
   return mismatches;
+}
+
+function validateProcessServiceMapping(nodes: DiagramNode[], edges: DiagramEdge[]): DiagramNode[] {
+  const processNodes = nodes.filter(n => n.type === 'process');
+  const issues: DiagramNode[] = [];
+
+  processNodes.forEach(process => {
+    const hasServiceConnection = edges.some(edge =>
+      (edge.source === process.id || edge.target === process.id) &&
+      (edge.props?.relationshipType === 'serves' || edge.props?.relationshipType === 'uses')
+    );
+
+    if (!hasServiceConnection) {
+      issues.push(process);
+    }
+  });
+
+  return issues;
+}
+
+function validateCapabilityRealization(nodes: DiagramNode[], edges: DiagramEdge[]): DiagramNode[] {
+  const capabilityNodes = nodes.filter(n => n.type === 'capability');
+  const issues: DiagramNode[] = [];
+
+  capabilityNodes.forEach(capability => {
+    const hasRealization = edges.some(edge =>
+      edge.source === capability.id &&
+      edge.props?.relationshipType === 'realizes' &&
+      nodes.some(n => n.id === edge.target && n.type === 'app')
+    );
+
+    if (!hasRealization) {
+      issues.push(capability);
+    }
+  });
+
+  return issues;
+}
+
+function validatePIIDataCompliance(nodes: DiagramNode[]): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const dataNodes = nodes.filter(n => n.type === 'data');
+
+  dataNodes.forEach(dataNode => {
+    const hasPII = dataNode.props?.containsPII === true;
+    const hasRetention = dataNode.props?.retentionPolicy;
+    const hasClassification = dataNode.props?.dataClassification;
+
+    if (hasPII && !hasRetention) {
+      issues.push({
+        type: 'error',
+        message: `Data node "${dataNode.label}" contains PII but lacks retention policy`,
+        nodeId: dataNode.id,
+        category: 'missing-property',
+      });
+    }
+
+    if (hasPII && !hasClassification) {
+      issues.push({
+        type: 'error',
+        message: `Data node "${dataNode.label}" contains PII but lacks data classification`,
+        nodeId: dataNode.id,
+        category: 'missing-property',
+      });
+    }
+  });
+
+  return issues;
+}
+
+function validateLayerCompliance(nodes: DiagramNode[], currentLayer: number): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  nodes.forEach(node => {
+    const nodeType = node.type;
+    const isAllowed = isNodeTypeAllowedInLayer(nodeType, currentLayer);
+
+    if (!isAllowed && !['note', 'group'].includes(nodeType)) {
+      issues.push({
+        type: 'warning',
+        message: `Node type "${nodeType}" is not recommended for Layer L${currentLayer}`,
+        nodeId: node.id,
+        category: 'coverage',
+      });
+    }
+  });
+
+  return issues;
 }
 
 function calculateCoverage(nodes: DiagramNode[]) {

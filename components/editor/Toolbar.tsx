@@ -31,8 +31,11 @@ import {
   ArrowRight,
   Minus,
 } from 'lucide-react';
+import { LayerSelector } from './LayerSelector';
 
 interface ToolbarProps {
+  currentLayer?: number;
+  onLayerChange?: (layer: number) => void;
   onSave?: () => void;
   onExport?: (format: 'json' | 'png' | 'svg' | 'pdf') => void;
   onImport?: () => void;
@@ -55,6 +58,8 @@ interface ToolbarProps {
 }
 
 export function Toolbar({
+  currentLayer = 0,
+  onLayerChange,
   onSave,
   onExport,
   onImport,
@@ -79,6 +84,16 @@ export function Toolbar({
     <TooltipProvider>
       <div className="border-b bg-background">
         <div className="flex items-center h-14 px-4 gap-2">
+          {onLayerChange && (
+            <>
+              <LayerSelector
+                currentLayer={currentLayer}
+                onLayerChange={onLayerChange}
+              />
+              <Separator orientation="vertical" className="h-8" />
+            </>
+          )}
+
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" onClick={onSave}>
@@ -312,7 +327,7 @@ export function Toolbar({
 
           <div className="ml-auto">
             <Button variant="outline" size="sm">
-              <span className="text-xs font-mono">ArchiBuilder v1.0</span>
+              <span className="text-xs font-mono">ArchiBuilder v2.1</span>
             </Button>
           </div>
         </div>

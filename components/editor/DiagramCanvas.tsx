@@ -19,14 +19,11 @@ interface DiagramCanvasProps {
   nodes: DiagramNode[];
   edges: DiagramEdge[];
   selectedEdge?: DiagramEdge | null;
-  selectedNodes?: string[];
-  selectedEdges?: string[];
-  onNodeClick?: (node: DiagramNode, multiSelect?: boolean) => void;
-  onEdgeClick?: (edge: DiagramEdge, multiSelect?: boolean) => void;
+  onNodeClick?: (node: DiagramNode) => void;
+  onEdgeClick?: (edge: DiagramEdge) => void;
   onCanvasDrop?: (data: any, position: { x: number; y: number }) => void;
   onNodeMove?: (nodeId: string, position: { x: number; y: number }) => void;
   onNodeResize?: (nodeId: string, size: { w: number; h: number }) => void;
-  onMultiSelect?: (nodeIds: string[], edgeIds: string[]) => void;
   connectionMode?: 'arrow' | 'line' | null;
   onConnectionStart?: (nodeId: string) => void;
   onConnectionEnd?: (sourceId: string, targetId: string) => void;
@@ -36,14 +33,11 @@ export function DiagramCanvas({
   nodes,
   edges,
   selectedEdge,
-  selectedNodes = [],
-  selectedEdges = [],
   onNodeClick,
   onEdgeClick,
   onCanvasDrop,
   onNodeMove,
   onNodeResize,
-  onMultiSelect,
   connectionMode,
   onConnectionStart,
   onConnectionEnd,
@@ -61,8 +55,6 @@ export function DiagramCanvas({
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [hoveredEdge, setHoveredEdge] = useState<string | null>(null);
-  const [selectionBox, setSelectionBox] = useState<{ start: { x: number; y: number }; end: { x: number; y: number } } | null>(null);
-  const [isSelecting, setIsSelecting] = useState(false);
 
   useEffect(() => {
     if (nodes.length === 0) return;
@@ -106,9 +98,7 @@ export function DiagramCanvas({
   const handleNodeMouseDown = (e: React.MouseEvent, node: DiagramNode) => {
     e.stopPropagation();
 
-    const isMultiSelect = e.shiftKey || e.ctrlKey || e.metaKey;
     setSelectedNode(node.id);
-    onNodeClick?.(node, isMultiSelect);
 
     if (connectionMode) {
       if (!connectionSource) {
@@ -164,11 +154,6 @@ export function DiagramCanvas({
 
     setMousePosition({ x: currentX, y: currentY });
 
-    if (isSelecting && selectionBox) {
-      setSelectionBox({ ...selectionBox, end: { x: currentX, y: currentY } });
-      return;
-    }
-
     if (resizingNode && resizeHandle) {
       const node = nodes.find(n => n.id === resizingNode);
       if (!node) return;
@@ -205,84 +190,14 @@ export function DiagramCanvas({
   };
 
   const handleMouseUp = () => {
-    if (isSelecting && selectionBox) {
-      const minX = Math.min(selectionBox.start.x, selectionBox.end.x);
-      const maxX = Math.max(selectionBox.start.x, selectionBox.end.x);
-      const minY = Math.min(selectionBox.start.y, selectionBox.end.y);
-      const maxY = Math.max(selectionBox.start.y, selectionBox.end.y);
-
-      const selectedNodeIds = nodes
-        .filter(node => {
-          const nodeRight = node.position.x + node.size.w;
-          const nodeBottom = node.position.y + node.size.h;
-          return (
-            node.position.x < maxX &&
-            nodeRight > minX &&
-            node.position.y < maxY &&
-            nodeBottom > minY
-          );
-        })
-        .map(node => node.id);
-
-      const selectedEdgeIds = edges
-        .filter(edge => {
-          const sourceNode = nodes.find(n => n.id === edge.source);
-          const targetNode = nodes.find(n => n.id === edge.target);
-          if (!sourceNode || !targetNode) return false;
-
-          const sourceCenterX = sourceNode.position.x + sourceNode.size.w / 2;
-          const sourceCenterY = sourceNode.position.y + sourceNode.size.h / 2;
-          const targetCenterX = targetNode.position.x + targetNode.size.w / 2;
-          const targetCenterY = targetNode.position.y + targetNode.size.h / 2;
-
-          const edgeMinX = Math.min(sourceCenterX, targetCenterX);
-          const edgeMaxX = Math.max(sourceCenterX, targetCenterX);
-          const edgeMinY = Math.min(sourceCenterY, targetCenterY);
-          const edgeMaxY = Math.max(sourceCenterY, targetCenterY);
-
-          return (
-            edgeMinX < maxX &&
-            edgeMaxX > minX &&
-            edgeMinY < maxY &&
-            edgeMaxY > minY
-          );
-        })
-        .map(edge => edge.id);
-
-      onMultiSelect?.(selectedNodeIds, selectedEdgeIds);
-      setIsSelecting(false);
-      setSelectionBox(null);
-    }
-
     setDraggedNode(null);
     setResizingNode(null);
     setResizeHandle(null);
   };
 
-  const handleCanvasMouseDown = (e: React.MouseEvent) => {
-    if (e.target !== contentRef.current && e.target !== canvasRef.current) return;
-    if (connectionMode) return;
-
-    const rect = contentRef.current?.getBoundingClientRect();
-    const scrollLeft = canvasRef.current?.scrollLeft || 0;
-    const scrollTop = canvasRef.current?.scrollTop || 0;
-
-    if (!rect) return;
-
-    const x = e.clientX - rect.left + scrollLeft;
-    const y = e.clientY - rect.top + scrollTop;
-
-    setIsSelecting(true);
-    setSelectionBox({ start: { x, y }, end: { x, y } });
-    setSelectedNode(null);
-  };
-
   const handleCanvasClick = (e: React.MouseEvent) => {
     if (e.target === contentRef.current || e.target === canvasRef.current) {
       setSelectedNode(null);
-      if (!isSelecting) {
-        onMultiSelect?.([], []);
-      }
     }
   };
 
@@ -294,7 +209,6 @@ export function DiagramCanvas({
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
       onClick={handleCanvasClick}
-      onMouseDown={handleCanvasMouseDown}
     >
       <div
         ref={contentRef}
@@ -317,7 +231,6 @@ export function DiagramCanvas({
         const isConnectionSource = connectionSource === node.id;
         const isHoverable = connectionMode && connectionSource && connectionSource !== node.id;
         const isHovered = hoveredNode === node.id;
-        const isMultiSelected = selectedNodes.includes(node.id);
 
         const nodeProps = {
           node,
@@ -383,21 +296,6 @@ export function DiagramCanvas({
                   height: node.size.h + 12,
                   border: '2px solid #10b981',
                   boxShadow: '0 0 15px rgba(16, 185, 129, 0.5)',
-                  zIndex: node.zIndex || 1,
-                  pointerEvents: 'none',
-                }}
-              />
-            )}
-            {isMultiSelected && (
-              <div
-                className="absolute rounded-lg"
-                style={{
-                  left: node.position.x - 4,
-                  top: node.position.y - 4,
-                  width: node.size.w + 8,
-                  height: node.size.h + 8,
-                  border: '2px solid #8b5cf6',
-                  boxShadow: '0 0 12px rgba(139, 92, 246, 0.4)',
                   zIndex: node.zIndex || 1,
                   pointerEvents: 'none',
                 }}
@@ -595,18 +493,15 @@ export function DiagramCanvas({
           const hasArrow = edge.type !== 'straight' || edge.animated;
           const isSelected = selectedEdge?.id === edge.id;
           const isHovered = hoveredEdge === edge.id;
-          const isMultiSelected = selectedEdges.includes(edge.id);
 
-          const strokeColor = isSelected ? '#3b82f6' : isMultiSelected ? '#8b5cf6' : isHovered ? '#10b981' : edge.style?.strokeColor || '#64748b';
-          const strokeWidth = isSelected ? 3 : isMultiSelected ? 3 : isHovered ? 3 : edge.style?.strokeWidth || 2;
+          const strokeColor = isSelected ? '#3b82f6' : isHovered ? '#10b981' : edge.style?.strokeColor || '#64748b';
+          const strokeWidth = isSelected ? 3 : isHovered ? 3 : edge.style?.strokeWidth || 2;
           const markerEnd = hasArrow
             ? isSelected
               ? "url(#arrowhead-selected)"
-              : isMultiSelected
-                ? "url(#arrowhead-selected)"
-                : isHovered
-                  ? "url(#arrowhead-hover)"
-                  : "url(#arrowhead)"
+              : isHovered
+                ? "url(#arrowhead-hover)"
+                : "url(#arrowhead)"
             : undefined;
 
           return (
@@ -686,20 +581,6 @@ export function DiagramCanvas({
             />
           );
         })()}
-
-        {selectionBox && (
-          <rect
-            x={Math.min(selectionBox.start.x, selectionBox.end.x)}
-            y={Math.min(selectionBox.start.y, selectionBox.end.y)}
-            width={Math.abs(selectionBox.end.x - selectionBox.start.x)}
-            height={Math.abs(selectionBox.end.y - selectionBox.start.y)}
-            fill="rgba(59, 130, 246, 0.1)"
-            stroke="#3b82f6"
-            strokeWidth={1}
-            strokeDasharray="5,5"
-            className="pointer-events-none"
-          />
-        )}
       </svg>
       </div>
     </div>

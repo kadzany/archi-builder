@@ -8,14 +8,17 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Button } from '@/components/ui/button';
 import { DiagramNode, DiagramEdge } from '@/lib/types/diagram';
 import { TOGAF_PHASES, ETOM_AREAS, SID_ENTITIES } from '@/lib/constants/frameworks';
+import { ExternalLink } from 'lucide-react';
 
 interface PropertiesPanelProps {
   selectedNode?: DiagramNode | null;
   selectedEdge?: DiagramEdge | null;
   onUpdateNode?: (id: string, updates: Partial<DiagramNode>) => void;
   onUpdateEdge?: (id: string, updates: Partial<DiagramEdge>) => void;
+  onDrillDown?: (nodeId: string) => void;
 }
 
 export function PropertiesPanel({
@@ -23,6 +26,7 @@ export function PropertiesPanel({
   selectedEdge,
   onUpdateNode,
   onUpdateEdge,
+  onDrillDown,
 }: PropertiesPanelProps) {
   if (!selectedNode && !selectedEdge) {
     return (
@@ -207,6 +211,21 @@ export function PropertiesPanel({
             <Separator />
 
             <div className="space-y-2">
+              <Label htmlFor="description">Description</Label>
+              <Textarea
+                id="description"
+                value={selectedNode.props?.description || ''}
+                onChange={(e) =>
+                  onUpdateNode?.(selectedNode.id, {
+                    props: { ...selectedNode.props, description: e.target.value },
+                  })
+                }
+                placeholder="Node description"
+                rows={3}
+              />
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="owner">Owner</Label>
               <Input
                 id="owner"
@@ -221,33 +240,69 @@ export function PropertiesPanel({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="sla">SLA</Label>
-              <Input
-                id="sla"
-                value={selectedNode.props?.sla || ''}
-                onChange={(e) =>
+              <Label htmlFor="status">Status</Label>
+              <Select
+                value={selectedNode.props?.status || 'proposed'}
+                onValueChange={(value) =>
                   onUpdateNode?.(selectedNode.id, {
-                    props: { ...selectedNode.props, sla: e.target.value },
+                    props: { ...selectedNode.props, status: value },
                   })
                 }
-                placeholder="e.g., 99.9%"
+              >
+                <SelectTrigger id="status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="proposed">Proposed</SelectItem>
+                  <SelectItem value="approved">Approved</SelectItem>
+                  <SelectItem value="implemented">Implemented</SelectItem>
+                  <SelectItem value="deprecated">Deprecated</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="domain">Domain</Label>
+              <Input
+                id="domain"
+                value={selectedNode.props?.domain || ''}
+                onChange={(e) =>
+                  onUpdateNode?.(selectedNode.id, {
+                    props: { ...selectedNode.props, domain: e.target.value },
+                  })
+                }
+                placeholder="Business domain"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="notes">Notes</Label>
-              <Textarea
-                id="notes"
-                value={selectedNode.props?.notes || ''}
+              <Label htmlFor="tags">Tags</Label>
+              <Input
+                id="tags"
+                value={selectedNode.props?.tags?.join(', ') || ''}
                 onChange={(e) =>
                   onUpdateNode?.(selectedNode.id, {
-                    props: { ...selectedNode.props, notes: e.target.value },
+                    props: { ...selectedNode.props, tags: e.target.value.split(',').map(t => t.trim()).filter(Boolean) },
                   })
                 }
-                placeholder="Additional notes"
-                rows={3}
+                placeholder="tag1, tag2, tag3"
               />
             </div>
+
+            {selectedNode.props?.childCanvasId && (
+              <div className="space-y-2">
+                <Label>Drill-Down Canvas</Label>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => onDrillDown?.(selectedNode.id)}
+                >
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                  Open Child Canvas
+                </Button>
+              </div>
+            )}
           </div>
         </ScrollArea>
       </Card>
@@ -275,7 +330,32 @@ export function PropertiesPanel({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="edge-type">Type</Label>
+              <Label htmlFor="relationship-type">Relationship Type</Label>
+              <Select
+                value={selectedEdge.props?.relationshipType || 'depends-on'}
+                onValueChange={(value) =>
+                  onUpdateEdge?.(selectedEdge.id, {
+                    props: { ...selectedEdge.props, relationshipType: value },
+                  })
+                }
+              >
+                <SelectTrigger id="relationship-type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="realizes">Realizes</SelectItem>
+                  <SelectItem value="serves">Serves</SelectItem>
+                  <SelectItem value="uses">Uses</SelectItem>
+                  <SelectItem value="hosts">Hosts</SelectItem>
+                  <SelectItem value="reads">Reads</SelectItem>
+                  <SelectItem value="depends-on">Depends On</SelectItem>
+                  <SelectItem value="composes">Composes</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edge-type">Edge Type</Label>
               <Select
                 value={selectedEdge.type}
                 onValueChange={(value) => onUpdateEdge?.(selectedEdge.id, { type: value as any })}

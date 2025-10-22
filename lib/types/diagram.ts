@@ -49,6 +49,7 @@ export interface DiagramNode {
 }
 
 export interface EdgeProps {
+  relationshipType?: string;
   latencyMs?: number;
   bandwidth?: string;
   protocol?: string;
