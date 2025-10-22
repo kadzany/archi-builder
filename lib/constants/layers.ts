@@ -1,14 +1,34 @@
-// import daftar SID dari frameworks
-import { SID_ENTITIES } from '@/lib/constants/frameworks';
+// lib/constants/layers.ts
 
-const SID_IDS = new Set<string>(SID_ENTITIES.map(e => e.id));
+// Import framework catalogs so we can normalize node types
+import { SID_ENTITIES, TOGAF_PHASES, ETOM_AREAS } from '@/lib/constants/frameworks';
 
+/** ----------------------------------------------------------------
+ *  Normalization helpers
+ *  ---------------------------------------------------------------- */
+const SID_IDS = new Set<string>(SID_ENTITIES.map(e => e.id));            // e.g. 'Customer','Party',...
+const TOGAF_PHASE_IDS = new Set<string>(TOGAF_PHASES.map(p => p.id));    // 'Preliminary','A','B',...,'H'
+const ETOM_AREA_IDS = new Set<string>(ETOM_AREAS.map(a => a.id));        // 'Strategy','Operations','Fulfillment','Assurance','Billing'
+
+/**
+ * Normalize node.type when the UI accidentally sets the framework ID
+ * as the type:
+ * - SID entity id   -> 'sid'
+ * - TOGAF phase id  -> 'phase'
+ * - eTOM area id    -> 'processArea'
+ * - otherwise       -> keep original
+ */
 function normalizeNodeType(nodeType: string): string {
-  // Jika nodeType adalah salah satu ID SID (mis. 'Party', 'Product', dst)
-  // treat as generic 'sid' untuk keperluan validasi layer
-  return SID_IDS.has(nodeType) ? 'sid' : nodeType;
+  const t = String(nodeType || '').trim();
+  if (SID_IDS.has(t)) return 'sid';
+  if (TOGAF_PHASE_IDS.has(t)) return 'phase';
+  if (ETOM_AREA_IDS.has(t)) return 'processArea';
+  return t;
 }
 
+/** ----------------------------------------------------------------
+ *  Layer definitions (L0–L4)
+ *  ---------------------------------------------------------------- */
 export const LAYER_DEFINITIONS = [
   {
     level: 0,
@@ -27,6 +47,7 @@ export const LAYER_DEFINITIONS = [
       'Keep high-level and avoid technical details',
       'Focus on business value and objectives',
     ],
+    // Alignment is used by governance checks for severity hints
     togafAlignment: ['Preliminary', 'A', 'B'],
     etomAlignment: ['Strategy'],
   },
@@ -78,7 +99,7 @@ export const LAYER_DEFINITIONS = [
     description: 'Technology stack, infrastructure, and deployment',
     icon: 'Server',
     color: '#f59e0b',
-    // SID allowed here ONLY for Resource family (governance enforces)
+    // SID allowed here ONLY for Resource family (enforced in governance)
     allowedNodeTypes: ['tech', 'data', 'sid', 'group', 'swimlane', 'note'],
     allowedContainers: ['swimlane', 'group'],
     recommendations: [
@@ -98,7 +119,7 @@ export const LAYER_DEFINITIONS = [
     description: 'Runtime environments, CI/CD, monitoring, and operations',
     icon: 'Activity',
     color: '#ef4444',
-    // No SID at runtime; focus tech/process ops
+    // No SID at runtime; focus on tech/process ops
     allowedNodeTypes: ['tech', 'process', 'group', 'swimlane', 'note'],
     allowedContainers: ['swimlane', 'group'],
     recommendations: [
@@ -112,6 +133,9 @@ export const LAYER_DEFINITIONS = [
   },
 ] as const;
 
+/** ----------------------------------------------------------------
+ *  Public helpers
+ *  ---------------------------------------------------------------- */
 export function getLayerDefinition(level: number) {
   return LAYER_DEFINITIONS.find(l => l.level === level) || LAYER_DEFINITIONS[0];
 }
@@ -133,35 +157,36 @@ export function isNodeTypeAllowedInLayer(nodeType: string, layerLevel: number): 
   return layer.allowedNodeTypes.includes(normalized as any);
 }
 
+/** Suggestable nodes (exclude generic containers/notes) */
 export function getRecommendedNodesForLayer(layerLevel: number) {
   const layer = getLayerDefinition(layerLevel);
   return layer.allowedNodeTypes.filter(type => !['note', 'group'].includes(type));
 }
 
-// --- alignment checker opsional ---
-// gunakan dari governance.ts untuk bikin warning yang lebih tajam
-
+/**
+ * Alignment helper (used by governance):
+ * - Checks whether a node.framework (togafPhase / etom) aligns with the current layer's
+ *   alignment hints (togafAlignment / etomAlignment). Returns booleans only;
+ *   severity & messages are handled in governance.ts.
+ */
 export function isFrameworkAllowedInLayer(
   framework: { togafPhase?: string; etom?: string | string[] } | undefined,
   layerLevel: number
 ): { togafOk: boolean; etomOk: boolean } {
   const layer = getLayerDefinition(layerLevel);
 
-  // TOGAF phase alignment
+  // TOGAF phase alignment (accepts exact IDs found in TOGAF_PHASES)
   let togafOk = true;
   if (framework?.togafPhase && Array.isArray(layer.togafAlignment)) {
-    // normalisasi code (Preliminary/A/B/..)
     const phase = framework.togafPhase.trim();
-    togafOk = layer.togafAlignment.includes(phase);
+    togafOk = (layer.togafAlignment as readonly string[]).includes(phase);
   }
 
-  // eTOM area alignment (terima string atau array)
+  // eTOM area alignment (accept string or array)
   let etomOk = true;
   if (framework?.etom && Array.isArray(layer.etomAlignment)) {
     const etoms = Array.isArray(framework.etom) ? framework.etom : [framework.etom];
-    // ok bila semua area yang tertera masuk dalam alignment layer
-    const etomAlignment = layer.etomAlignment as string[];
-    etomOk = etoms.every(a => etomAlignment.includes(a));
+    etomOk = etoms.every(a => (layer.etomAlignment as readonly string[]).includes(a));
   }
 
   return { togafOk, etomOk };

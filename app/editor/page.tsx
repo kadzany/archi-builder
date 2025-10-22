@@ -9,9 +9,44 @@ import { LayerTransitionDialog } from '@/components/editor/LayerTransitionDialog
 import { DiagramNode, DiagramEdge, DiagramSchema } from '@/lib/types/diagram';
 import { exportDiagramToJSON, validateDiagram } from '@/lib/validation/governance';
 import { useToast } from '@/hooks/use-toast';
-import { isNodeTypeAllowedInLayer, isFrameworkAllowedInLayer } from '@/lib/constants/layers';
+import { isNodeTypeAllowedInLayer } from '@/lib/constants/layers';
 
 const makeEmptyDiagram = () => ({ nodes: [] as DiagramNode[], edges: [] as DiagramEdge[] });
+
+/** Helper: map data from Palette to canonical node.type */
+function resolveDroppedNodeType(data: any): string {
+  // Palette sets { type: 'sid'|'togaf'|'etom'|'node'|'container'|'shape', ... }
+  const srcType = String(data?.type || '').trim();
+
+  if (srcType === 'sid') return 'sid';
+  if (srcType === 'togaf') return 'phase';
+  if (srcType === 'etom') return 'processArea';
+
+  // For generic nodes/containers/shapes coming from your NODE_TYPES/CONTAINER_TYPES/SHAPE_TYPES
+  // we assume they already carry a canonical id like 'capability','process','app','data','group','swimlane', etc.
+  // Fallback to data.id (kept for backward-compat).
+  return data?.id || 'capability';
+}
+
+/** Helper: framework payload from Palette data */
+function resolveFramework(data: any):
+  | { togafPhase?: string; etom?: string | string[]; sid?: string[] }
+  | undefined {
+  const srcType = String(data?.type || '').trim();
+
+  if (srcType === 'sid') {
+    return { sid: [data.id] };
+  }
+  if (srcType === 'togaf') {
+    // TOGAF_PHASES item has id like 'A','B','Preliminary', etc.
+    return { togafPhase: data.id };
+  }
+  if (srcType === 'etom') {
+    // ETOM_AREAS item has id like 'Operations','Assurance', ...
+    return { etom: data.id };
+  }
+  return undefined;
+}
 
 export default function EditorPage() {
   const { toast } = useToast();
@@ -45,11 +80,11 @@ export default function EditorPage() {
   }, [nodes, edges, currentLayer]);
 
   const handleCanvasDrop = (data: any, position: { x: number; y: number }) => {
-    const nodeType = data.id || 'capability';
+    // ✅ determine canonical node.type from drag source
+    const nodeType = resolveDroppedNodeType(data);
 
-    if (!isNodeTypeAllowedInLayer(nodeType, currentLayer) && 
-    !isFrameworkAllowedInLayer(nodeType, currentLayer) &&
-    !['note', 'group'].includes(nodeType)) {
+    // validate against current layer policy
+    if (!isNodeTypeAllowedInLayer(nodeType, currentLayer) && !['note', 'group'].includes(nodeType)) {
       toast({
         title: 'Node type not recommended',
         description: `"${nodeType}" is not recommended for Layer L${currentLayer}. Consider switching layers.`,
@@ -58,7 +93,14 @@ export default function EditorPage() {
       return;
     }
 
-    const isContainer = data.isContainer || data.shape === 'swimlane' || data.shape === 'phase' || data.shape === 'processArea';
+    // detect container kinds
+    const isContainer =
+      data.isContainer ||
+      data.shape === 'swimlane' ||
+      data.shape === 'phase' ||
+      nodeType === 'swimlane' ||
+      nodeType === 'phase' ||
+      nodeType === 'processArea';
 
     const defaultSize = isContainer
       ? { w: 400, h: 300 }
@@ -66,10 +108,12 @@ export default function EditorPage() {
         ? { w: 180, h: 150 }
         : { w: 200, h: 80 };
 
+    const framework = resolveFramework(data);
+
     const newNode: DiagramNode = {
       id: `node-${Date.now()}`,
       type: nodeType,
-      label: data.label || 'New Node',
+      label: data.label || data.name || data.id || 'New Node',
       position,
       size: defaultSize,
       style: {
@@ -77,13 +121,7 @@ export default function EditorPage() {
         icon: data.icon,
         shape: data.shape || 'rectangle',
       },
-      framework: data.togafPhase
-        ? { togafPhase: data.id }
-        : data.etom
-          ? { etom: data.id }
-          : data.sid
-            ? { sid: [data.id] }
-            : undefined,
+      framework, // ✅ consistent: sid/togaf/etom set by source
       isContainer,
       zIndex: isContainer ? 0 : 1,
     };

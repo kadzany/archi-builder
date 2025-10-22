@@ -1,63 +1,15 @@
+// lib/governance.ts
+
 import { DiagramSchema, ValidationIssue, GovernanceReport, DiagramNode, DiagramEdge } from '@/lib/types/diagram';
-import { isNodeTypeAllowedInLayer, isFrameworkAllowedInLayer } from '@/lib/constants/layers';
+import { isNodeTypeAllowedInLayer, isFrameworkAllowedInLayer, getLayerDefinition, LAYER_DEFINITIONS } from '@/lib/constants/layers';
 
-/**
- * Layer framework policy:
- * - L0: TOGAF phases only (Preliminary..H). No eTOM, no SID.
- * - L1: eTOM allowed (all areas). TOGAF recommended B. No SID.
- * - L2: SID allowed (all). TOGAF recommended C. No eTOM (warn).
- * - L3: SID allowed only Resource family. TOGAF recommended D.
- * - L4: TOGAF recommended E/F/G (implementation/runtimes). No eTOM, no SID.
- */
-const RESOURCE_SID_WHITELIST = new Set([
-  'Resource',
-  'ResourceSpecification',
-  'ResourceOrder',
-  'ResourceFunction',
-  // tambahkan kalau kamu punya varian lain di constants
-]);
-
-const LAYER_FRAMEWORK_POLICY: Record<number, {
-  togafAllowed?: 'any' | Set<string>;
-  togafRecommended?: Set<string>;
-  etomAllowed?: 'any' | Set<string>;
-  sidAllowed?: 'any' | Set<string>;
-}> = {
-  0: {
-    togafAllowed: 'any',        // Enterprise overview boleh refer semua phase
-    togafRecommended: new Set(['Preliminary', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']),
-    etomAllowed: new Set(),     // none
-    sidAllowed: new Set(),      // none
-  },
-  1: {
-    togafAllowed: 'any',
-    togafRecommended: new Set(['B']),
-    etomAllowed: 'any',         // eTOM landscape & capabilities
-    sidAllowed: new Set(),      // none
-  },
-  2: {
-    togafAllowed: 'any',
-    togafRecommended: new Set(['C']),
-    etomAllowed: new Set(),     // default: warn jika ada eTOM di L2
-    sidAllowed: 'any',          // seluruh SID di Application & Data
-  },
-  3: {
-    togafAllowed: 'any',
-    togafRecommended: new Set(['D']),
-    etomAllowed: new Set(),     // none
-    sidAllowed: RESOURCE_SID_WHITELIST, // hanya Resource family
-  },
-  4: {
-    togafAllowed: 'any',
-    togafRecommended: new Set(['E', 'F', 'G']),
-    etomAllowed: new Set(),     // none
-    sidAllowed: new Set(),      // none
-  },
-};
-
+/** ----------------------------------------------------------------
+ *  Main validator
+ *  ---------------------------------------------------------------- */
 export function validateDiagram(schema: DiagramSchema, currentLayer?: number): GovernanceReport {
   const issues: ValidationIssue[] = [];
 
+  // Connectivity checks
   const orphanNodes = findOrphanNodes(schema.nodes, schema.edges);
   orphanNodes.forEach(node => {
     issues.push({
@@ -78,6 +30,7 @@ export function validateDiagram(schema: DiagramSchema, currentLayer?: number): G
     });
   });
 
+  // Metadata checks
   const missingProperties = findMissingProperties(schema.nodes);
   missingProperties.forEach(node => {
     issues.push({
@@ -88,6 +41,7 @@ export function validateDiagram(schema: DiagramSchema, currentLayer?: number): G
     });
   });
 
+  // Domain-specific checks
   const processWithoutService = validateProcessServiceMapping(schema.nodes, schema.edges);
   processWithoutService.forEach(node => {
     issues.push({
@@ -109,52 +63,81 @@ export function validateDiagram(schema: DiagramSchema, currentLayer?: number): G
   });
 
   const piiDataIssues = validatePIIDataCompliance(schema.nodes);
-  piiDataIssues.forEach(issue => {
-    issues.push(issue);
-  });
+  piiDataIssues.forEach(issue => issues.push(issue));
 
+  // Layer-level checks
   if (currentLayer !== undefined) {
+    // Technical allowance (node.type vs layer)
     const layerViolations = validateLayerCompliance(schema.nodes, currentLayer);
     layerViolations.forEach(issue => issues.push(issue));
 
-    // tambahkan framework alignment check pakai isFrameworkAllowedInLayer
+    // Framework alignment (TOGAF & eTOM) with dynamic severity & suggestions
     schema.nodes.forEach(node => {
       const fw = node.framework;
       if (!fw) return;
 
       const { togafOk, etomOk } = isFrameworkAllowedInLayer(fw, currentLayer);
 
-      if (!togafOk && fw.togafPhase) {
-        issues.push({
-          type: 'warning',
-          message: `TOGAF phase "${fw.togafPhase}" on "${node.label}" may not align with Layer L${currentLayer}.`,
-          nodeId: node.id,
-          category: 'framework',
-        });
+      // --- TOGAF ---
+      if (fw.togafPhase) {
+        if (!togafOk) {
+          const dist = togafDistanceToLayer(fw.togafPhase, currentLayer);
+          const severity: 'info' | 'warning' = dist <= 1 ? 'info' : 'warning';
+          const suggested = fmtLayers(layersForTogafPhase(fw.togafPhase));
+          issues.push({
+            type: severity,
+            message:
+              suggested.length > 0
+                ? `TOGAF phase "${fw.togafPhase}" on "${node.label}" is not ideal for L${currentLayer}. Consider moving to ${suggested}.`
+                : `TOGAF phase "${fw.togafPhase}" on "${node.label}" is not aligned with L${currentLayer}.`,
+            nodeId: node.id,
+            category: 'framework',
+          });
+        } else {
+          // Optional: nudge if close but not primary
+          const dist = togafDistanceToLayer(fw.togafPhase, currentLayer);
+          if (dist > 0 && dist <= 1) {
+            issues.push({
+              type: 'info',
+              message: `TOGAF phase "${fw.togafPhase}" is close but not the primary alignment for L${currentLayer}.`,
+              nodeId: node.id,
+              category: 'framework',
+            });
+          }
+        }
       }
 
-      if (!etomOk && fw.etom) {
-        const areas = Array.isArray(fw.etom) ? fw.etom.join(', ') : fw.etom;
-        issues.push({
-          type: 'warning',
-          message: `eTOM process area "${areas}" is not typical for Layer L${currentLayer}.`,
-          nodeId: node.id,
-          category: 'framework',
-        });
+      // --- eTOM ---
+      if (fw.etom) {
+        const areas: string[] = Array.isArray(fw.etom) ? fw.etom : [fw.etom];
+        if (!etomOk) {
+          areas.forEach(a => {
+            const suggested = fmtLayers(layersForEtomArea(a));
+            issues.push({
+              type: 'warning',
+              message:
+                suggested.length > 0
+                  ? `eTOM area "${a}" is not typical for L${currentLayer}. Consider moving to ${suggested}.`
+                  : `eTOM area "${a}" is not aligned with L${currentLayer}.`,
+              nodeId: node.id,
+              category: 'framework',
+            });
+          });
+        }
       }
     });
   }
 
+  // Coverage + score
   const coverage = calculateCoverage(schema.nodes);
   const completeness = calculateCompleteness(schema, issues);
 
-  return {
-    issues,
-    coverage,
-    completeness,
-  };
+  return { issues, coverage, completeness };
 }
 
+/** ----------------------------------------------------------------
+ *  Connectivity & metadata helpers
+ *  ---------------------------------------------------------------- */
 function findOrphanNodes(nodes: DiagramNode[], edges: DiagramEdge[]): DiagramNode[] {
   const connectedNodeIds = new Set<string>();
   edges.forEach(edge => {
@@ -183,21 +166,9 @@ function findMissingProperties(nodes: DiagramNode[]): DiagramNode[] {
   );
 }
 
-// reserved for future: detect cross-phase edges if you want to flag them.
-function findPhaseMismatches(edges: DiagramEdge[], nodes: DiagramNode[]): DiagramEdge[] {
-  const nodeMap = new Map(nodes.map(n => [n.id, n]));
-  const mismatches: DiagramEdge[] = [];
-  edges.forEach(edge => {
-    const sourceNode = nodeMap.get(edge.source);
-    const targetNode = nodeMap.get(edge.target);
-    if (sourceNode?.framework?.togafPhase && targetNode?.framework?.togafPhase) {
-      // Example: If you later want to restrict certain cross-phase hops, add logic here.
-      // Currently we collect none.
-    }
-  });
-  return mismatches;
-}
-
+/** ----------------------------------------------------------------
+ *  Domain-specific rules
+ *  ---------------------------------------------------------------- */
 function validateProcessServiceMapping(nodes: DiagramNode[], edges: DiagramEdge[]): DiagramNode[] {
   const processNodes = nodes.filter(n => n.type === 'process');
   const issues: DiagramNode[] = [];
@@ -253,7 +224,9 @@ function validatePIIDataCompliance(nodes: DiagramNode[]): ValidationIssue[] {
   return issues;
 }
 
-/** existing: technical node-type vs layer allowance */
+/** ----------------------------------------------------------------
+ *  Technical layer/type allowance
+ *  ---------------------------------------------------------------- */
 function validateLayerCompliance(nodes: DiagramNode[], currentLayer: number): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   nodes.forEach(node => {
@@ -271,129 +244,43 @@ function validateLayerCompliance(nodes: DiagramNode[], currentLayer: number): Va
   return issues;
 }
 
-/** NEW: framework alignment (TOGAF/eTOM/SID) vs active layer */
-function validateFrameworkLayerAlignment(nodes: DiagramNode[], currentLayer: number): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-  const policy = LAYER_FRAMEWORK_POLICY[currentLayer];
+/** ----------------------------------------------------------------
+ *  Alignment scoring utilities (TOGAF/eTOM)
+ *  ---------------------------------------------------------------- */
+const TOGAF_ORDER: Record<string, number> = {
+  Preliminary: 0, A: 1, B: 2, C: 3, D: 4, E: 5, F: 6, G: 7, H: 8,
+};
 
-  nodes.forEach(node => {
-    const fw = node.framework;
-
-    // TOGAF phase checks
-    if (fw?.togafPhase && policy?.togafAllowed !== undefined) {
-      const norm = normalizeTogafPhase(fw.togafPhase);
-      if (policy.togafAllowed !== 'any' && !policy.togafAllowed.has(norm)) {
-        issues.push({
-          type: 'warning',
-          message: `TOGAF phase "${fw.togafPhase}" on "${node.label}" may not be ideal for L${currentLayer}`,
-          nodeId: node.id,
-          category: 'framework',
-        });
-      }
-      if (policy.togafRecommended && !policy.togafRecommended.has(norm)) {
-        issues.push({
-          type: 'info',
-          message: `Consider aligning "${node.label}" to TOGAF phase ${Array.from(policy.togafRecommended).join('/')} for L${currentLayer}`,
-          nodeId: node.id,
-          category: 'framework',
-        });
-      }
-    }
-
-    // eTOM checks
-    if (fw?.etom !== undefined) {
-      // allow single string or array
-      const etoms: string[] = Array.isArray(fw.etom) ? fw.etom : [fw.etom];
-      if (policy?.etomAllowed instanceof Set && policy.etomAllowed.size === 0) {
-        // not allowed at this layer
-        etoms.forEach(val => {
-          issues.push({
-            type: 'warning',
-            message: `eTOM "${val}" should not be placed at Layer L${currentLayer}. Move to L1: Capability & Process.`,
-            nodeId: node.id,
-            category: 'framework',
-          });
-        });
-      }
-      // if 'any' we accept silently
-    }
-
-    // SID checks
-    if (fw?.sid && policy?.sidAllowed !== undefined) {
-      const sids: string[] = Array.isArray(fw.sid) ? fw.sid : [fw.sid];
-      const sidAllowed = policy.sidAllowed; // Store in local variable
-      if (sidAllowed === 'any') {
-        // allowed
-      } else {
-        // only specific sets allowed (e.g., L3 Resource family). Others warned.
-        sids.forEach(sid => {
-          if (!sidAllowed.has(sid)) {
-            issues.push({
-              type: currentLayer === 3 ? 'warning' : 'error',
-              message:
-                currentLayer === 3
-                  ? `SID "${sid}" is not typical for L3. Only Resource-family entities are recommended in L3.`
-                  : `SID "${sid}" should not be placed at Layer L${currentLayer}.`,
-              nodeId: node.id,
-              category: 'framework',
-            });
-          }
-        });
-      }
-    }
-
-    // Extra: hard rules by layer vs node.type, to nudge users
-    if (currentLayer === 1 && fw?.sid) {
-      issues.push({
-        type: 'warning',
-        message: `SID on "${node.label}" found at L1. Move data/application entities to L2.`,
-        nodeId: node.id,
-        category: 'framework',
-      });
-    }
-    if (currentLayer === 2 && fw?.etom) {
-      issues.push({
-        type: 'warning',
-        message: `eTOM on "${node.label}" found at L2. eTOM processes sebaiknya berada di L1.`,
-        nodeId: node.id,
-        category: 'framework',
-      });
-    }
-    if (currentLayer === 4 && (fw?.sid || fw?.etom)) {
-      issues.push({
-        type: 'warning',
-        message: `Framework references (SID/eTOM) jarang ditempatkan di L4 Runtime. Pertimbangkan memindahkan ke L2 (SID) atau L1 (eTOM).`,
-        nodeId: node.id,
-        category: 'framework',
-      });
-    }
-  });
-
-  return issues;
+function togafDistanceToLayer(phaseId: string, layerLevel: number): number {
+  const layer = getLayerDefinition(layerLevel);
+  const allowed = (layer.togafAlignment || []) as readonly string[];
+  if (!allowed.length || TOGAF_ORDER[phaseId] === undefined) return Number.POSITIVE_INFINITY;
+  const p = TOGAF_ORDER[phaseId];
+  return Math.min(...allowed
+    .filter(a => TOGAF_ORDER[a] !== undefined)
+    .map(a => Math.abs(TOGAF_ORDER[a] - p)));
 }
 
-/** Normalize "togafPhase" values into canonical codes: Preliminary, A..H */
-function normalizeTogafPhase(phaseRaw: string): string {
-  const p = (phaseRaw || '').trim().toLowerCase();
-
-  if (p.startsWith('pre')) return 'Preliminary';
-  if (/^a\b|vision/.test(p)) return 'A';
-  if (/^b\b|business/.test(p)) return 'B';
-  if (/^c\b|information|application|data/.test(p)) return 'C';
-  if (/^d\b|tech/.test(p)) return 'D';
-  if (/^e\b|opportunities|solution/.test(p)) return 'E';
-  if (/^f\b|migration/.test(p)) return 'F';
-  if (/^g\b|implementation/.test(p)) return 'G';
-  if (/^h\b|change/.test(p)) return 'H';
-
-  // fallback to raw upper letter if user passes "A/B/.."
-  const single = p.toUpperCase();
-  if (['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].includes(single)) return single;
-
-  // keep original if unknown
-  return phaseRaw;
+function layersForTogafPhase(phaseId: string): number[] {
+  return LAYER_DEFINITIONS
+    .filter(ld => (ld.togafAlignment as readonly string[] | undefined)?.includes(phaseId))
+    .map(ld => ld.level);
 }
 
+function layersForEtomArea(areaId: string): number[] {
+  return LAYER_DEFINITIONS
+    .filter(ld => (ld.etomAlignment as readonly string[] | undefined)?.includes(areaId))
+    .map(ld => ld.level);
+}
+
+function fmtLayers(levels: number[]): string {
+  const uniq = Array.from(new Set(levels)).sort((a, b) => a - b);
+  return uniq.map(l => `L${l}`).join(', ');
+}
+
+/** ----------------------------------------------------------------
+ *  Coverage + scoring
+ *  ---------------------------------------------------------------- */
 function calculateCoverage(nodes: DiagramNode[]) {
   const togafPhases = new Set<string>();
   const etomAreas = new Set<string>();
@@ -401,13 +288,15 @@ function calculateCoverage(nodes: DiagramNode[]) {
 
   nodes.forEach(node => {
     if (node.framework?.togafPhase) {
-      togafPhases.add(normalizeTogafPhase(node.framework.togafPhase));
+      togafPhases.add(node.framework.togafPhase.trim());
     }
     if (node.framework?.etom) {
-      (Array.isArray(node.framework.etom) ? node.framework.etom : [node.framework.etom]).forEach(a => etomAreas.add(a));
+      (Array.isArray(node.framework.etom) ? node.framework.etom : [node.framework.etom])
+        .forEach(a => etomAreas.add(a));
     }
     if (node.framework?.sid) {
-      (Array.isArray(node.framework.sid) ? node.framework.sid : [node.framework.sid]).forEach(entity => sidEntities.add(entity));
+      (Array.isArray(node.framework.sid) ? node.framework.sid : [node.framework.sid])
+        .forEach(entity => sidEntities.add(entity));
     }
   });
 
@@ -434,6 +323,9 @@ function calculateCompleteness(schema: DiagramSchema, issues: ValidationIssue[])
   return Math.round(finalScore);
 }
 
+/** ----------------------------------------------------------------
+ *  JSON import/export helpers
+ *  ---------------------------------------------------------------- */
 export function exportDiagramToJSON(schema: DiagramSchema): string {
   return JSON.stringify(schema, null, 2);
 }
