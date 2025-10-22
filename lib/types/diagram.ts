@@ -140,7 +140,7 @@ export interface ValidationIssue {
   message: string;
   nodeId?: string;
   edgeId?: string;
-  category: 'orphan' | 'unlabeled' | 'phase-mismatch' | 'missing-property' | 'coverage';
+  category: 'orphan' | 'unlabeled' | 'phase-mismatch' | 'missing-property' | 'coverage' | 'framework' | 'custom';
 }
 
 export interface GovernanceReport {

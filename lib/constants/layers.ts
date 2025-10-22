@@ -1,3 +1,14 @@
+// import daftar SID dari frameworks
+import { SID_ENTITIES } from '@/lib/constants/frameworks';
+
+const SID_IDS = new Set<string>(SID_ENTITIES.map(e => e.id));
+
+function normalizeNodeType(nodeType: string): string {
+  // Jika nodeType adalah salah satu ID SID (mis. 'Party', 'Product', dst)
+  // treat as generic 'sid' untuk keperluan validasi layer
+  return SID_IDS.has(nodeType) ? 'sid' : nodeType;
+}
+
 export const LAYER_DEFINITIONS = [
   {
     level: 0,
@@ -7,6 +18,7 @@ export const LAYER_DEFINITIONS = [
     description: 'Strategic view with TOGAF phases and enterprise domains',
     icon: 'Building2',
     color: '#8b5cf6',
+    // No SID here
     allowedNodeTypes: ['phase', 'swimlane', 'capability', 'group', 'note'],
     allowedContainers: ['phase', 'swimlane'],
     recommendations: [
@@ -26,6 +38,7 @@ export const LAYER_DEFINITIONS = [
     description: 'Business capabilities and eTOM process landscape',
     icon: 'Layers',
     color: '#3b82f6',
+    // No SID at capability/process view
     allowedNodeTypes: ['capability', 'process', 'processArea', 'swimlane', 'group', 'note'],
     allowedContainers: ['processArea', 'swimlane'],
     recommendations: [
@@ -45,13 +58,14 @@ export const LAYER_DEFINITIONS = [
     description: 'Application components, services, and data architecture',
     icon: 'Box',
     color: '#10b981',
-    allowedNodeTypes: ['app', 'data', 'group', 'swimlane', 'note'],
+    // MAIN place for SID (all entities), plus app & data
+    allowedNodeTypes: ['app', 'data', 'sid', 'group', 'swimlane', 'note'],
     allowedContainers: ['swimlane', 'group'],
     recommendations: [
       'Map applications that realize capabilities',
       'Define data entities and flows',
       'Show integration patterns and APIs',
-      'Use SID Service and Resource entities',
+      'Use SID entities (Customer/Product/Service/Resource/etc.)',
     ],
     togafAlignment: ['C', 'D'],
     etomAlignment: ['Operations'],
@@ -64,7 +78,8 @@ export const LAYER_DEFINITIONS = [
     description: 'Technology stack, infrastructure, and deployment',
     icon: 'Server',
     color: '#f59e0b',
-    allowedNodeTypes: ['tech', 'data', 'group', 'swimlane', 'note'],
+    // SID allowed here ONLY for Resource family (governance enforces)
+    allowedNodeTypes: ['tech', 'data', 'sid', 'group', 'swimlane', 'note'],
     allowedContainers: ['swimlane', 'group'],
     recommendations: [
       'Detail technology components and platforms',
@@ -83,6 +98,7 @@ export const LAYER_DEFINITIONS = [
     description: 'Runtime environments, CI/CD, monitoring, and operations',
     icon: 'Activity',
     color: '#ef4444',
+    // No SID at runtime; focus tech/process ops
     allowedNodeTypes: ['tech', 'process', 'group', 'swimlane', 'note'],
     allowedContainers: ['swimlane', 'group'],
     recommendations: [
@@ -101,23 +117,52 @@ export function getLayerDefinition(level: number) {
 }
 
 export function getLayerForNodeType(nodeType: string): number[] {
+  const normalized = normalizeNodeType(nodeType);
   const layers: number[] = [];
-
   LAYER_DEFINITIONS.forEach(layer => {
-    if (layer.allowedNodeTypes.includes(nodeType as any)) {
+    if (layer.allowedNodeTypes.includes(normalized as any)) {
       layers.push(layer.level);
     }
   });
-
   return layers.length > 0 ? layers : [0, 1, 2, 3, 4];
 }
 
 export function isNodeTypeAllowedInLayer(nodeType: string, layerLevel: number): boolean {
+  const normalized = normalizeNodeType(nodeType);
   const layer = getLayerDefinition(layerLevel);
-  return layer.allowedNodeTypes.includes(nodeType as any);
+  return layer.allowedNodeTypes.includes(normalized as any);
 }
 
 export function getRecommendedNodesForLayer(layerLevel: number) {
   const layer = getLayerDefinition(layerLevel);
   return layer.allowedNodeTypes.filter(type => !['note', 'group'].includes(type));
+}
+
+// --- alignment checker opsional ---
+// gunakan dari governance.ts untuk bikin warning yang lebih tajam
+
+export function isFrameworkAllowedInLayer(
+  framework: { togafPhase?: string; etom?: string | string[] } | undefined,
+  layerLevel: number
+): { togafOk: boolean; etomOk: boolean } {
+  const layer = getLayerDefinition(layerLevel);
+
+  // TOGAF phase alignment
+  let togafOk = true;
+  if (framework?.togafPhase && Array.isArray(layer.togafAlignment)) {
+    // normalisasi code (Preliminary/A/B/..)
+    const phase = framework.togafPhase.trim();
+    togafOk = layer.togafAlignment.includes(phase);
+  }
+
+  // eTOM area alignment (terima string atau array)
+  let etomOk = true;
+  if (framework?.etom && Array.isArray(layer.etomAlignment)) {
+    const etoms = Array.isArray(framework.etom) ? framework.etom : [framework.etom];
+    // ok bila semua area yang tertera masuk dalam alignment layer
+    const etomAlignment = layer.etomAlignment as string[];
+    etomOk = etoms.every(a => etomAlignment.includes(a));
+  }
+
+  return { togafOk, etomOk };
 }

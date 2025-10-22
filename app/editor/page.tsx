@@ -9,7 +9,7 @@ import { LayerTransitionDialog } from '@/components/editor/LayerTransitionDialog
 import { DiagramNode, DiagramEdge, DiagramSchema } from '@/lib/types/diagram';
 import { exportDiagramToJSON, validateDiagram } from '@/lib/validation/governance';
 import { useToast } from '@/hooks/use-toast';
-import { isNodeTypeAllowedInLayer } from '@/lib/constants/layers';
+import { isNodeTypeAllowedInLayer, isFrameworkAllowedInLayer } from '@/lib/constants/layers';
 
 const makeEmptyDiagram = () => ({ nodes: [] as DiagramNode[], edges: [] as DiagramEdge[] });
 
@@ -47,7 +47,9 @@ export default function EditorPage() {
   const handleCanvasDrop = (data: any, position: { x: number; y: number }) => {
     const nodeType = data.id || 'capability';
 
-    if (!isNodeTypeAllowedInLayer(nodeType, currentLayer) && !['note', 'group'].includes(nodeType)) {
+    if (!isNodeTypeAllowedInLayer(nodeType, currentLayer) && 
+    !isFrameworkAllowedInLayer(nodeType, currentLayer) &&
+    !['note', 'group'].includes(nodeType)) {
       toast({
         title: 'Node type not recommended',
         description: `"${nodeType}" is not recommended for Layer L${currentLayer}. Consider switching layers.`,
