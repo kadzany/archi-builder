@@ -5,10 +5,11 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { TOGAF_PHASES, ETOM_AREAS, SID_ENTITIES, NODE_TYPES, CONTAINER_TYPES, SHAPE_TYPES, CONNECTOR_TYPES } from '@/lib/constants/frameworks';
+import { TOGAF_PHASES, ETOM_AREAS, SID_GROUPS, SID_ENTITIES, NODE_TYPES, CONTAINER_TYPES, SHAPE_TYPES, CONNECTOR_TYPES } from '@/lib/constants/frameworks';
 import { getLayerDefinition } from '@/lib/constants/layers';
 import * as Icons from 'lucide-react';
 import { Info } from 'lucide-react';
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 
 interface PaletteProps {
   currentLayer?: number;
@@ -161,28 +162,59 @@ export function Palette({ currentLayer = 0, onDragStart }: PaletteProps) {
                 );
               })}
             </div>
-
-            <div className="space-y-2 mt-4">
+            
+            <div className="space-y-3 mt-4">
               <h3 className="text-xs font-medium text-muted-foreground uppercase">SID Entities</h3>
-              {SID_ENTITIES.map((entity) => {
-                const IconComponent = Icons[entity.icon as keyof typeof Icons] as any;
-                return (
-                  <div
-                    key={entity.id}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, 'sid', entity)}
-                    className="flex items-center gap-2 p-2 rounded border bg-card hover:bg-accent cursor-move transition-colors"
-                  >
-                    <div
-                      className="w-8 h-8 rounded flex items-center justify-center"
-                      style={{ backgroundColor: `${entity.color}15`, color: entity.color }}
-                    >
-                      {IconComponent && <IconComponent className="w-4 h-4" />}
-                    </div>
-                    <span className="text-sm">{entity.label}</span>
-                  </div>
-                );
-              })}
+              <Accordion
+                type="multiple"
+                // buka default beberapa domain yang paling sering dipakai
+                defaultValue={['customer', 'product', 'service']}
+                className="w-full"
+              >
+                {SID_GROUPS.map((group) => {
+                  const items = SID_ENTITIES.filter((e) => e.groupId === group.id);
+                  if (items.length === 0) return null;
+
+                  return (
+                    <AccordionItem key={group.id} value={group.id} className="border rounded">
+                      <AccordionTrigger className="px-3 py-2 hover:no-underline">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: group.color }} />
+                          <span className="text-[11px] font-semibold uppercase text-muted-foreground">
+                            {group.label} ({items.length})
+                          </span>
+                        </div>
+                      </AccordionTrigger>
+
+                      <AccordionContent className="px-3 pb-3">
+                        <div className="space-y-1.5">
+                          {items.map((entity) => {
+                            const IconComponent = Icons[entity.icon as keyof typeof Icons] as any;
+                            return (
+                              <div
+                                key={entity.id}
+                                draggable
+                                onDragStart={(e) => handleDragStart(e, 'sid', entity)}
+                                className="flex items-center gap-2 p-2 rounded border bg-card hover:bg-accent cursor-move transition-colors"
+                              >
+                                <div
+                                  className="w-8 h-8 rounded flex items-center justify-center"
+                                  style={{ backgroundColor: `${entity.color}15`, color: entity.color }}
+                                >
+                                  {IconComponent && <IconComponent className="w-4 h-4" />}
+                                </div>
+                                <div className="flex-1">
+                                  <span className="text-sm">{entity.label}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  );
+                })}
+              </Accordion>
             </div>
           </TabsContent>
 

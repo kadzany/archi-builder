@@ -83,15 +83,15 @@ export function LayerTransitionDialog({
                 <p className="font-medium">What changes:</p>
                 <ul className="space-y-1 ml-4">
                   <li className="flex gap-2">
-                    <span>\u2022</span>
+                    <span>•</span>
                     <span>Palette will show {toDef.allowedNodeTypes.length} node types</span>
                   </li>
                   <li className="flex gap-2">
-                    <span>\u2022</span>
+                    <span>•</span>
                     <span>Validation rules adjusted for {toDef.label}</span>
                   </li>
                   <li className="flex gap-2">
-                    <span>\u2022</span>
+                    <span>•</span>
                     <span>Framework alignment: TOGAF {toDef.togafAlignment.join(', ') || 'N/A'}</span>
                   </li>
                 </ul>

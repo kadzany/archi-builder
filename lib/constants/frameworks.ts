@@ -18,15 +18,54 @@ export const ETOM_AREAS = [
   { id: 'Billing', label: 'Billing & Revenue Management', color: '#f59e0b' },
 ] as const;
 
+// --- TMF SID GROUPS ---
+export const SID_GROUPS = [
+  { id: 'customer', label: 'Customer Domain', color: '#3b82f6' },
+  { id: 'product',  label: 'Product Domain',  color: '#06b6d4' },
+  { id: 'service',  label: 'Service Domain',  color: '#10b981' },
+  { id: 'resource', label: 'Resource Domain', color: '#f59e0b' },
+  { id: 'support',  label: 'Support & Assurance', color: '#ef4444' },
+  { id: 'common',   label: 'Common', color: '#64748b' },
+] as const;
+
+// --- TMF SID ENTITIES (extended, grouped) ---
 export const SID_ENTITIES = [
-  { id: 'Customer', label: 'Customer', icon: 'Users', color: '#3b82f6' },
-  { id: 'Product', label: 'Product', icon: 'Package', color: '#06b6d4' },
-  { id: 'Service', label: 'Service', icon: 'Network', color: '#10b981' },
-  { id: 'Resource', label: 'Resource', icon: 'Server', color: '#f59e0b' },
-  { id: 'Party', label: 'Party', icon: 'User', color: '#ec4899' },
-  { id: 'Location', label: 'Location', icon: 'MapPin', color: '#8b5cf6' },
-  { id: 'Agreement', label: 'Agreement', icon: 'FileText', color: '#ef4444' },
-  { id: 'Order', label: 'Order', icon: 'ShoppingCart', color: '#14b8a6' },
+  // Core (tetap ada & tetap ID lama)
+  { id: 'Customer',  label: 'Customer',  icon: 'Users',          color: '#3b82f6', groupId: 'customer' },
+  { id: 'Product',   label: 'Product',   icon: 'Package',        color: '#06b6d4', groupId: 'product' },
+  { id: 'Service',   label: 'Service',   icon: 'Network',        color: '#10b981', groupId: 'service' },
+  { id: 'Resource',  label: 'Resource',  icon: 'Server',         color: '#f59e0b', groupId: 'resource' },
+  { id: 'Party',     label: 'Party',     icon: 'User',           color: '#ec4899', groupId: 'customer' },
+  { id: 'Location',  label: 'Location',  icon: 'MapPin',         color: '#8b5cf6', groupId: 'common' },
+  { id: 'Agreement', label: 'Agreement', icon: 'FileText',       color: '#ef4444', groupId: 'customer' },
+  { id: 'Order',     label: 'Order',     icon: 'ShoppingCart',   color: '#14b8a6', groupId: 'product' },
+
+  // Customer Domain
+  { id: 'CustomerAccount',      label: 'Customer Account',      icon: 'CreditCard',       color: '#60a5fa', groupId: 'customer' },
+  { id: 'CustomerBill',         label: 'Customer Bill',         icon: 'Receipt',          color: '#93c5fd', groupId: 'customer' },
+  { id: 'CustomerInteraction',  label: 'Customer Interaction',  icon: 'MessageCircle',    color: '#2563eb', groupId: 'customer' },
+
+  // Product Domain
+  { id: 'ProductOffering',      label: 'Product Offering',      icon: 'Tag',              color: '#0ea5e9', groupId: 'product' },
+  { id: 'ProductSpecification', label: 'Product Specification', icon: 'ClipboardList',    color: '#0284c7', groupId: 'product' },
+
+  // Service Domain
+  { id: 'ServiceSpecification', label: 'Service Specification', icon: 'Layers',           color: '#34d399', groupId: 'service' },
+  { id: 'ServiceOrder',         label: 'Service Order',         icon: 'ClipboardCheck',   color: '#059669', groupId: 'service' },
+  { id: 'ServiceProblem',       label: 'Service Problem',       icon: 'AlertTriangle',    color: '#f87171', groupId: 'support' },
+
+  // Resource Domain
+  { id: 'ResourceSpecification', label: 'Resource Specification', icon: 'Cpu',            color: '#fbbf24', groupId: 'resource' },
+  { id: 'ResourceOrder',         label: 'Resource Order',         icon: 'Box',            color: '#f59e0b', groupId: 'resource' },
+  { id: 'ResourceFunction',      label: 'Resource Function',      icon: 'Settings',       color: '#eab308', groupId: 'resource' },
+
+  // Support / Assurance
+  { id: 'TroubleTicket', label: 'Trouble Ticket', icon: 'LifeBuoy', color: '#fb7185', groupId: 'support' },
+  { id: 'WorkOrder',     label: 'Work Order',     icon: 'Wrench',    color: '#f472b6', groupId: 'support' },
+
+  // Common
+  { id: 'Characteristic', label: 'Characteristic', icon: 'SlidersHorizontal', color: '#64748b', groupId: 'common' },
+  { id: 'TimePeriod',     label: 'Time Period',    icon: 'Clock',             color: '#94a3b8', groupId: 'common' },
 ] as const;
 
 export const NODE_TYPES = [

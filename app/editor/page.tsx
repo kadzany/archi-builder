@@ -11,16 +11,38 @@ import { exportDiagramToJSON, validateDiagram } from '@/lib/validation/governanc
 import { useToast } from '@/hooks/use-toast';
 import { isNodeTypeAllowedInLayer } from '@/lib/constants/layers';
 
+const makeEmptyDiagram = () => ({ nodes: [] as DiagramNode[], edges: [] as DiagramEdge[] });
+
 export default function EditorPage() {
   const { toast } = useToast();
   const [currentLayer, setCurrentLayer] = useState<number>(0);
   const [pendingLayer, setPendingLayer] = useState<number | null>(null);
   const [showLayerDialog, setShowLayerDialog] = useState(false);
-  const [nodes, setNodes] = useState<DiagramNode[]>([]);
-  const [edges, setEdges] = useState<DiagramEdge[]>([]);
+
+  // NEW: storage per layer
+  const [layerDiagrams, setLayerDiagrams] = useState<Record<number, { nodes: DiagramNode[]; edges: DiagramEdge[] }>>({
+    0: makeEmptyDiagram(),
+    1: makeEmptyDiagram(),
+    2: makeEmptyDiagram(),
+    3: makeEmptyDiagram(),
+    4: makeEmptyDiagram(),
+  });
+
+  // working set bound to DiagramCanvas
+  const [nodes, setNodes] = useState<DiagramNode[]>(layerDiagrams[0].nodes);
+  const [edges, setEdges] = useState<DiagramEdge[]>(layerDiagrams[0].edges);
+
   const [selectedNode, setSelectedNode] = useState<DiagramNode | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<DiagramEdge | null>(null);
   const [connectionMode, setConnectionMode] = useState<'arrow' | 'line' | null>(null);
+
+  // keep storage updated when working set changes
+  useEffect(() => {
+    setLayerDiagrams((prev) => ({
+      ...prev,
+      [currentLayer]: { nodes, edges },
+    }));
+  }, [nodes, edges, currentLayer]);
 
   const handleCanvasDrop = (data: any, position: { x: number; y: number }) => {
     const nodeType = data.id || 'capability';
@@ -39,8 +61,8 @@ export default function EditorPage() {
     const defaultSize = isContainer
       ? { w: 400, h: 300 }
       : data.shape === 'note'
-      ? { w: 180, h: 150 }
-      : { w: 200, h: 80 };
+        ? { w: 180, h: 150 }
+        : { w: 200, h: 80 };
 
     const newNode: DiagramNode = {
       id: `node-${Date.now()}`,
@@ -56,10 +78,10 @@ export default function EditorPage() {
       framework: data.togafPhase
         ? { togafPhase: data.id }
         : data.etom
-        ? { etom: data.id }
-        : data.sid
-        ? { sid: [data.id] }
-        : undefined,
+          ? { etom: data.id }
+          : data.sid
+            ? { sid: [data.id] }
+            : undefined,
       isContainer,
       zIndex: isContainer ? 0 : 1,
     };
@@ -86,10 +108,7 @@ export default function EditorPage() {
       target: targetId,
       type: 'straight',
       animated: connectionMode === 'arrow',
-      style: {
-        strokeWidth: 2,
-        strokeColor: '#64748b',
-      },
+      style: { strokeWidth: 2, strokeColor: '#64748b' },
     };
 
     setEdges((prev) => [...prev, newEdge]);
@@ -104,10 +123,7 @@ export default function EditorPage() {
   const handleConnectionModeChange = (mode: 'arrow' | 'line' | null) => {
     setConnectionMode(mode);
     if (mode) {
-      toast({
-        title: 'Connection Mode Active',
-        description: `Click two nodes to create ${mode} connection`,
-      });
+      toast({ title: 'Connection Mode Active', description: `Click two nodes to create ${mode} connection` });
     }
   };
 
@@ -122,23 +138,13 @@ export default function EditorPage() {
   };
 
   const handleUpdateNode = (id: string, updates: Partial<DiagramNode>) => {
-    setNodes((prev) =>
-      prev.map((node) => (node.id === id ? { ...node, ...updates } : node))
-    );
-
-    if (selectedNode?.id === id) {
-      setSelectedNode((prev) => (prev ? { ...prev, ...updates } : null));
-    }
+    setNodes((prev) => prev.map((node) => (node.id === id ? { ...node, ...updates } : node)));
+    if (selectedNode?.id === id) setSelectedNode((prev) => (prev ? { ...prev, ...updates } : null));
   };
 
   const handleUpdateEdge = (id: string, updates: Partial<DiagramEdge>) => {
-    setEdges((prev) =>
-      prev.map((edge) => (edge.id === id ? { ...edge, ...updates } : edge))
-    );
-
-    if (selectedEdge?.id === id) {
-      setSelectedEdge((prev) => (prev ? { ...prev, ...updates } : null));
-    }
+    setEdges((prev) => prev.map((edge) => (edge.id === id ? { ...edge, ...updates } : edge)));
+    if (selectedEdge?.id === id) setSelectedEdge((prev) => (prev ? { ...prev, ...updates } : null));
   };
 
   const handleSave = () => {
@@ -168,10 +174,7 @@ export default function EditorPage() {
     a.click();
     URL.revokeObjectURL(url);
 
-    toast({
-      title: 'Diagram saved',
-      description: 'Diagram exported to JSON file',
-    });
+    toast({ title: 'Diagram saved', description: 'Diagram exported to JSON file' });
   };
 
   const handleExport = (format: 'json' | 'png' | 'svg' | 'pdf') => {
@@ -194,13 +197,32 @@ export default function EditorPage() {
   };
 
   const handleConfirmLayerChange = () => {
-    if (pendingLayer !== null) {
-      setCurrentLayer(pendingLayer);
-      toast({
-        title: 'Layer changed',
-        description: `Switched to Layer L${pendingLayer}`,
-      });
+    if (pendingLayer === null) {
+      setShowLayerDialog(false);
+      return;
     }
+
+    // snapshot current layer (safety)
+    setLayerDiagrams((prev) => ({
+      ...prev,
+      [currentLayer]: { nodes, edges },
+    }));
+
+    // load target layer or empty diagram
+    const target = layerDiagrams[pendingLayer] ?? makeEmptyDiagram();
+
+    setNodes(target.nodes);
+    setEdges(target.edges);
+
+    // reset UI state
+    setSelectedNode(null);
+    setSelectedEdge(null);
+    setConnectionMode(null);
+
+    setCurrentLayer(pendingLayer);
+
+    toast({ title: 'Layer changed', description: `Switched to Layer L${pendingLayer}` });
+
     setShowLayerDialog(false);
     setPendingLayer(null);
   };
@@ -251,7 +273,6 @@ export default function EditorPage() {
           const newNode = { ...node, position };
 
           if (node.isContainer) {
-            const children = prev.filter(n => n.parentId === nodeId);
             return newNode;
           }
 
@@ -286,23 +307,14 @@ export default function EditorPage() {
   };
 
   const handleNodeResize = (nodeId: string, size: { w: number; h: number }) => {
-    setNodes((prev) =>
-      prev.map((node) =>
-        node.id === nodeId ? { ...node, size } : node
-      )
-    );
-
-    if (selectedNode?.id === nodeId) {
-      setSelectedNode((prev) => (prev ? { ...prev, size } : null));
-    }
+    setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, size } : node)));
+    if (selectedNode?.id === nodeId) setSelectedNode((prev) => (prev ? { ...prev, size } : null));
   };
 
   const handleDelete = () => {
     if (selectedNode) {
       setNodes((prev) => prev.filter((n) => n.id !== selectedNode.id));
-      setEdges((prev) =>
-        prev.filter((e) => e.source !== selectedNode.id && e.target !== selectedNode.id)
-      );
+      setEdges((prev) => prev.filter((e) => e.source !== selectedNode.id && e.target !== selectedNode.id));
       setSelectedNode(null);
       toast({ title: 'Node deleted' });
     } else if (selectedEdge) {
@@ -346,6 +358,7 @@ export default function EditorPage() {
         <Palette currentLayer={currentLayer} />
 
         <DiagramCanvas
+          key={`layer-${currentLayer}`}
           nodes={nodes}
           edges={edges}
           selectedEdge={selectedEdge}
