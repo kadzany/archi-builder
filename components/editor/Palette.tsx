@@ -6,10 +6,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { TOGAF_PHASES, ETOM_AREAS, SID_GROUPS, SID_ENTITIES, NODE_TYPES, CONTAINER_TYPES, SHAPE_TYPES, CONNECTOR_TYPES } from '@/lib/constants/frameworks';
+import { CAPABILITY_CATALOG, APPLICATION_CATALOG } from '@/lib/constants/catalogs';
 import { getLayerDefinition } from '@/lib/constants/layers';
 import * as Icons from 'lucide-react';
 import { Info } from 'lucide-react';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
+import { useRef, useState, useEffect, useCallback } from 'react';
+
 
 interface PaletteProps {
   currentLayer?: number;
@@ -23,7 +26,7 @@ export function Palette({ currentLayer = 0, onDragStart }: PaletteProps) {
     return items.filter(item => {
       const nodeType = item.id;
       return layerDef.allowedNodeTypes.includes(nodeType as any) ||
-             layerDef.allowedContainers.includes(nodeType as any);
+        layerDef.allowedContainers.includes(nodeType as any);
     });
   };
 
@@ -51,11 +54,42 @@ export function Palette({ currentLayer = 0, onDragStart }: PaletteProps) {
       </div>
 
       <Tabs defaultValue="shapes" className="w-full">
-        <TabsList className="w-full grid grid-cols-3 rounded-none">
-          <TabsTrigger value="shapes" className="text-xs">Nodes</TabsTrigger>
-          <TabsTrigger value="togaf" className="text-xs">TOGAF</TabsTrigger>
-          <TabsTrigger value="etom" className="text-xs">eTOM</TabsTrigger>
-        </TabsList>
+        {/* Scrollable TabsList with arrows */}
+        <div className="relative flex items-center">
+          {/* Left Arrow */}
+          <button
+            type="button"
+            className="absolute left-0 z-10 p-1 bg-background/80 hover:bg-accent rounded-r shadow-sm"
+            onClick={() => {
+              const el = document.getElementById('palette-tabs-scroll');
+              if (el) el.scrollBy({ left: -80, behavior: 'smooth' });
+            }}
+          >
+            <Icons.ChevronLeft className="h-4 w-4" />
+          </button>
+
+          <TabsList
+            className="w-full rounded-none flex overflow-x-auto no-scrollbar scroll-smooth gap-1 px-3 whitespace-nowrap pl-[7.5rem] pr-[1.75rem]"
+          >
+            <TabsTrigger value="shapes" className="h-7 px-2 text-[11px] shrink-0">Nodes</TabsTrigger>
+            <TabsTrigger value="capabilities" className="h-7 px-2 text-[11px] shrink-0">Capabilities</TabsTrigger>
+            <TabsTrigger value="apps" className="h-7 px-2 text-[11px] shrink-0">Apps</TabsTrigger>
+            <TabsTrigger value="togaf" className="h-7 px-2 text-[11px] shrink-0">TOGAF</TabsTrigger>
+            <TabsTrigger value="etom" className="h-7 px-2 text-[11px] shrink-0">eTOM</TabsTrigger>
+          </TabsList>
+
+          {/* Right Arrow */}
+          <button
+            type="button"
+            className="absolute right-0 z-10 p-1 bg-background/80 hover:bg-accent rounded-l shadow-sm"
+            onClick={() => {
+              const el = document.getElementById('palette-tabs-scroll');
+              if (el) el.scrollBy({ left: 80, behavior: 'smooth' });
+            }}
+          >
+            <Icons.ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
 
         <ScrollArea className="h-[calc(100vh-180px)]">
           <TabsContent value="shapes" className="p-3 space-y-2 mt-0">
@@ -162,7 +196,7 @@ export function Palette({ currentLayer = 0, onDragStart }: PaletteProps) {
                 );
               })}
             </div>
-            
+
             <div className="space-y-3 mt-4">
               <h3 className="text-xs font-medium text-muted-foreground uppercase">SID Entities</h3>
               <Accordion
@@ -216,6 +250,58 @@ export function Palette({ currentLayer = 0, onDragStart }: PaletteProps) {
                 })}
               </Accordion>
             </div>
+          </TabsContent>
+
+          <TabsContent value="capabilities" className="p-3 space-y-2 mt-0">
+            <h3 className="text-xs font-medium text-muted-foreground uppercase mb-2">Business Capabilities</h3>
+            {CAPABILITY_CATALOG.map((cap) => {
+              const IconComponent = Icons[cap.icon as keyof typeof Icons] as any;
+              const color = cap.color || '#3b82f6';
+              return (
+                <div
+                  key={cap.id}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, 'node', { id: 'capability', label: cap.label })}
+                  className="p-3 rounded border bg-card hover:bg-accent cursor-move transition-colors"
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <div
+                      className="w-6 h-6 rounded flex items-center justify-center"
+                      style={{ backgroundColor: `${color}15`, color }}
+                    >
+                      {IconComponent && <IconComponent className="w-4 h-4" />}
+                    </div>
+                    <span className="text-sm font-medium">{cap.label}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </TabsContent>
+
+          <TabsContent value="apps" className="p-3 space-y-2 mt-0">
+            <h3 className="text-xs font-medium text-muted-foreground uppercase mb-2">Applications</h3>
+            {APPLICATION_CATALOG.map((app) => {
+              const IconComponent = Icons[app.icon as keyof typeof Icons] as any;
+              const color = app.color || '#10b981';
+              return (
+                <div
+                  key={app.label}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, 'node', { id: 'app', label: app.label, capabilityRef: app.capabilityRef })}
+                  className="p-3 rounded border bg-card hover:bg-accent cursor-move transition-colors"
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <div
+                      className="w-6 h-6 rounded flex items-center justify-center"
+                      style={{ backgroundColor: `${color}15`, color }}
+                    >
+                      {IconComponent && <IconComponent className="w-4 h-4" />}
+                    </div>
+                    <span className="text-sm font-medium">{app.label}</span>
+                  </div>
+                </div>
+              );
+            })}
           </TabsContent>
 
           <TabsContent value="togaf" className="p-3 space-y-2 mt-0">
